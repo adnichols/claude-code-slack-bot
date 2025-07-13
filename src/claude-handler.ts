@@ -2,6 +2,7 @@ import { query, type SDKMessage } from '@anthropic-ai/claude-code';
 import { ConversationSession } from './types';
 import { Logger } from './logger';
 import { McpManager, McpServerConfig } from './mcp-manager';
+import * as path from 'path';
 
 export class ClaudeHandler {
   private sessions: Map<string, ConversationSession> = new Map();
@@ -62,7 +63,7 @@ export class ClaudeHandler {
       const permissionServer = {
         'permission-prompt': {
           command: 'npx',
-          args: ['tsx', '/Users/marcelpociot/Experiments/claude-code-slack/src/permission-mcp-server.ts'],
+          args: ['tsx', path.join(process.cwd(), 'src', 'permission-mcp-server.ts')],
           env: {
             SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN,
             SLACK_CONTEXT: JSON.stringify(slackContext)
@@ -105,6 +106,14 @@ export class ClaudeHandler {
     }
 
     this.logger.debug('Claude query options', options);
+    this.logger.info('About to call Claude SDK with:', {
+      prompt: prompt.substring(0, 100) + (prompt.length > 100 ? '...' : ''),
+      workingDirectory,
+      mcpServersCount: options.mcpServers ? Object.keys(options.mcpServers).length : 0,
+      mcpServerNames: options.mcpServers ? Object.keys(options.mcpServers) : [],
+      allowedTools: options.allowedTools || [],
+      slackContext: !!slackContext
+    });
 
     try {
       for await (const message of query({

@@ -121,6 +121,16 @@ export class WorkingDirectoryManager {
       return channelConfig.directory;
     }
 
+    // Final fallback: use BASE_DIRECTORY if configured
+    if (config.baseDirectory) {
+      this.logger.debug('Using BASE_DIRECTORY as default working directory', {
+        directory: config.baseDirectory,
+        channelId,
+        threadTs,
+      });
+      return config.baseDirectory;
+    }
+
     this.logger.debug('No working directory configured', { channelId, threadTs });
     return undefined;
   }
@@ -160,19 +170,24 @@ export class WorkingDirectoryManager {
     if (directory) {
       let message = `Current working directory for ${context}: \`${directory}\``;
       if (config.baseDirectory) {
+        if (directory === config.baseDirectory) {
+          message += ` *(using BASE_DIRECTORY default)*`;
+        }
         message += `\n\nBase directory: \`${config.baseDirectory}\``;
         message += `\nYou can use relative paths like \`cwd project-name\` or absolute paths.`;
       }
       return message;
     }
     
-    let message = `No working directory set for ${context}. Please set one using:`;
+    // This should rarely happen now since BASE_DIRECTORY is used as fallback
+    let message = `No working directory available for ${context}.`;
     if (config.baseDirectory) {
+      message += ` BASE_DIRECTORY \`${config.baseDirectory}\` is configured but not accessible.`;
+      message += `\nPlease check the directory exists or set a specific one using:`;
       message += `\n\`cwd project-name\` (relative to base directory)`;
       message += `\n\`cwd /absolute/path/to/directory\` (absolute path)`;
-      message += `\n\nBase directory: \`${config.baseDirectory}\``;
     } else {
-      message += `\n\`cwd /path/to/directory\` or \`set directory /path/to/directory\``;
+      message += ` Please set one using:\n\`cwd /path/to/directory\``;
     }
     return message;
   }

@@ -157,27 +157,14 @@ export class SlackHandler {
 
     // Working directory is always required
     if (!workingDirectory) {
-      let errorMessage = `⚠️ No working directory set. `;
+      let errorMessage = `⚠️ No working directory available. `;
       
-      if (!isDM && !this.workingDirManager.hasChannelWorkingDirectory(channel)) {
-        // No channel default set
-        errorMessage += `Please set a default working directory for this channel first using:\n`;
-        if (config.baseDirectory) {
-          errorMessage += `\`cwd project-name\` or \`cwd /absolute/path\`\n\n`;
-          errorMessage += `Base directory: \`${config.baseDirectory}\``;
-        } else {
-          errorMessage += `\`cwd /path/to/directory\``;
-        }
-      } else if (thread_ts) {
-        // In thread but no thread-specific directory
-        errorMessage += `You can set a thread-specific working directory using:\n`;
-        if (config.baseDirectory) {
-          errorMessage += `\`@claudebot cwd project-name\` or \`@claudebot cwd /absolute/path\``;
-        } else {
-          errorMessage += `\`@claudebot cwd /path/to/directory\``;
-        }
+      if (config.baseDirectory) {
+        errorMessage += `BASE_DIRECTORY is configured but the path \`${config.baseDirectory}\` is not accessible. `;
+        errorMessage += `Please check that the directory exists and is readable, or set a specific working directory using:\n`;
+        errorMessage += `\`cwd project-name\` or \`cwd /absolute/path\``;
       } else {
-        errorMessage += `Please set one first using:\n\`cwd /path/to/directory\``;
+        errorMessage += `No BASE_DIRECTORY is configured. Please set a working directory using:\n\`cwd /path/to/directory\``;
       }
       
       await say({
@@ -574,10 +561,23 @@ export class SlackHandler {
       return;
     }
 
+    // Convert Unicode emojis to Slack emoji names
+    const emojiMap: Record<string, string> = {
+      '🤔': 'thinking_face',
+      '⚙️': 'gear',
+      '✅': 'white_check_mark',
+      '❌': 'x',
+      '📋': 'clipboard',
+      '🔄': 'arrows_counterclockwise',
+      '⏹️': 'stop_button'
+    };
+
+    const slackEmojiName = emojiMap[emoji] || emoji;
+
     // Check if we're already showing this emoji
     const currentEmoji = this.currentReactions.get(sessionKey);
-    if (currentEmoji === emoji) {
-      this.logger.debug('Reaction already set, skipping', { sessionKey, emoji });
+    if (currentEmoji === slackEmojiName) {
+      this.logger.debug('Reaction already set, skipping', { sessionKey, emoji: slackEmojiName });
       return;
     }
 
@@ -604,11 +604,11 @@ export class SlackHandler {
       await this.app.client.reactions.add({
         channel: originalMessage.channel,
         timestamp: originalMessage.ts,
-        name: emoji,
+        name: slackEmojiName,
       });
 
       // Track the current reaction
-      this.currentReactions.set(sessionKey, emoji);
+      this.currentReactions.set(sessionKey, slackEmojiName);
 
       this.logger.debug('Updated message reaction', { 
         sessionKey, 

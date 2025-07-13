@@ -24,10 +24,11 @@ The bot allows users to interact with Claude Code through Slack, providing real-
 ### Key Features
 
 #### 1. Working Directory Management
+- **Auto-Default BASE_DIRECTORY**: If BASE_DIRECTORY is configured, it's automatically used as the default working directory
 - **Base Directory Support**: Configure a base directory (e.g., `/Users/username/Code/`) to use short project names
-- **Channel Defaults**: Each channel gets a default working directory when the bot is first added
+- **Channel Overrides**: Channels can set specific working directories that override the BASE_DIRECTORY default
 - **Thread Overrides**: Individual threads can override the channel default by mentioning the bot
-- **Hierarchy**: Thread-specific > Channel default > DM-specific
+- **Hierarchy**: Thread-specific > Channel-specific > BASE_DIRECTORY default
 - **Smart Resolution**: Supports both relative paths (`cwd project-name`) and absolute paths
 
 #### 2. Real-Time Task Tracking
