@@ -151,6 +151,48 @@ Users see real-time task lists as Claude plans and executes work:
 Progress: 1/3 tasks completed (33%)
 ```
 
+### Smart Permission System
+The bot features an intelligent permission system with multiple approval scopes and smart persistence:
+
+#### Permission Scopes
+- **🔧 Tool-level**: Broad approval for entire tools (e.g., "Allow GitHub CLI access")
+- **⚙️ Action-level**: Medium scope for specific actions (e.g., "Allow creating GitHub issues")  
+- **📝 Command-level**: Narrow scope for exact commands with full parameters
+
+#### Permission UI Examples
+```
+🔐 Permission Request
+
+🐙 **Create GitHub Issue**
+Allow Claude to create issues in GitHub repositories
+
+🟢 Risk Level: low
+⚙️ Scope: action
+
+[✅ Approve] [❌ Deny] [🔧 Approve Tool] [📝 Approve Command]
+```
+
+#### Configuration Options
+```env
+# Default approval scope (tool|action|command)
+PERMISSION_DEFAULT_SCOPE=action
+
+# Show detailed parameters in requests
+PERMISSION_SHOW_DETAILS=true
+
+# Allow broader tool-level approvals
+PERMISSION_ALLOW_TOOL_LEVEL=true
+
+# Auto-approve low-risk operations
+PERMISSION_AUTO_APPROVE_LOW_RISK=false
+```
+
+#### Smart Persistence
+- **Tool-level**: 3-7 days depending on risk
+- **Action-level**: 12 hours - 2 days depending on risk
+- **Command-level**: 6-24 hours depending on risk
+- Automatically checks for existing approvals before prompting
+
 ### MCP Server Management
 ```
 # View configured MCP servers

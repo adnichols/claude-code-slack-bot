@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { ApprovalScope } from './permission-formatter';
 
 dotenv.config();
 
@@ -17,6 +18,18 @@ export const config = {
   },
   baseDirectory: process.env.BASE_DIRECTORY || '',
   debug: process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development',
+  permissions: {
+    // Default approval scope: 'tool' | 'action' | 'command'
+    defaultScope: (process.env.PERMISSION_DEFAULT_SCOPE as ApprovalScope) || 'action',
+    // Whether to show detailed parameters in approval requests
+    showDetails: process.env.PERMISSION_SHOW_DETAILS !== 'false',
+    // Whether to allow tool-level approvals (broader scope)
+    allowToolLevel: process.env.PERMISSION_ALLOW_TOOL_LEVEL !== 'false',
+    // Whether to allow command-level approvals (narrower scope)
+    allowCommandLevel: process.env.PERMISSION_ALLOW_COMMAND_LEVEL !== 'false',
+    // Auto-approve low-risk operations
+    autoApproveLowRisk: process.env.PERMISSION_AUTO_APPROVE_LOW_RISK === 'true',
+  },
 };
 
 export function validateConfig() {

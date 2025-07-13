@@ -8,6 +8,7 @@ import { TodoManager, Todo } from './todo-manager';
 import { McpManager } from './mcp-manager';
 import { permissionServer } from './permission-mcp-server';
 import { config } from './config';
+import { ErrorAnalyzer } from './error-analyzer';
 
 interface MessageEvent {
   user: string;
@@ -346,10 +347,24 @@ export class SlackHandler {
         // Update reaction to show error
         await this.updateMessageReaction(sessionKey, '❌');
         
+        // Analyze error and provide actionable feedback
+        const actionableError = ErrorAnalyzer.analyzeError(error);
+        const errorMessage = ErrorAnalyzer.formatErrorMessage(actionableError);
+        
         await say({
-          text: `Error: ${error.message || 'Something went wrong'}`,
+          text: errorMessage,
           thread_ts: thread_ts || ts,
         });
+        
+        // Log detailed error for debugging (only if it's a critical user action)
+        if (actionableError.category === 'user_action_required' || actionableError.severity === 'high') {
+          this.logger.warn('User action required', {
+            error: error.message,
+            userAction: actionableError.userAction,
+            category: actionableError.category,
+            sessionKey
+          });
+        }
       } else {
         this.logger.debug('Request was aborted', { sessionKey });
         

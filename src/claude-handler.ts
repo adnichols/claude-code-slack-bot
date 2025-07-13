@@ -2,6 +2,7 @@ import { query, type SDKMessage } from '@anthropic-ai/claude-code';
 import { ConversationSession } from './types';
 import { Logger } from './logger';
 import { McpManager, McpServerConfig } from './mcp-manager';
+import { ErrorAnalyzer } from './error-analyzer';
 import * as path from 'path';
 
 export class ClaudeHandler {
@@ -135,6 +136,20 @@ export class ClaudeHandler {
       }
     } catch (error) {
       this.logger.error('Error in Claude query', error);
+      
+      // Analyze the error to provide better context
+      const actionableError = ErrorAnalyzer.analyzeError(error);
+      
+      // If it's a user action required error, add context to the error
+      if (actionableError.category === 'user_action_required' || actionableError.category === 'configuration') {
+        const enhancedError = new Error(actionableError.message);
+        (enhancedError as any).userAction = actionableError.userAction;
+        (enhancedError as any).category = actionableError.category;
+        (enhancedError as any).severity = actionableError.severity;
+        (enhancedError as any).details = actionableError.details;
+        throw enhancedError;
+      }
+      
       throw error;
     }
   }
