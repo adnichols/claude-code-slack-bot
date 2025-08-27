@@ -847,33 +847,88 @@ export class SlackHandler {
     threadTs: string,
     say: any
   ): Promise<void> {
-    this.logger.info('Processing user message with potential tool results', {
-      slackMessageIndex,
-      sessionKey,
-      hasMessage: !!message.message,
-      messageKeys: message.message ? Object.keys(message.message) : [],
-      hasContent: !!message.message?.content,
-      contentLength: message.message?.content?.length || 0
-    });
+    try {
+      this.logger.info('Processing user message with potential tool results', {
+        slackMessageIndex,
+        sessionKey,
+        hasMessage: !!message.message,
+        messageKeys: message.message ? Object.keys(message.message) : [],
+        hasContent: !!message.message?.content,
+        contentLength: message.message?.content?.length || 0
+      });
 
-    if (!message.message?.content || !Array.isArray(message.message.content)) {
-      this.logger.debug('User message has no content array', { slackMessageIndex, sessionKey });
-      return;
-    }
+      if (!message.message?.content || !Array.isArray(message.message.content)) {
+        this.logger.debug('User message has no content array', { slackMessageIndex, sessionKey });
+        return;
+      }
 
-    // Look for tool_result content in the message
-    const toolResults = message.message.content.filter((part: any) => part.type === 'tool_result');
-    
-    this.logger.info('Found tool results in user message', {
-      slackMessageIndex,
-      sessionKey,
-      toolResultCount: toolResults.length,
-      toolResultIds: toolResults.map((result: any) => result.tool_use_id),
-      contentTypes: message.message.content.map((part: any) => part.type)
-    });
+      // Look for tool_result content in the message
+      let toolResults: any[] = [];
+      try {
+        toolResults = message.message.content.filter((part: any) => part.type === 'tool_result');
+      } catch (filterError: any) {
+        this.logger.error('Error filtering tool results from message content', {
+          error: filterError.message,
+          sessionKey,
+          slackMessageIndex
+        });
+        return; // Exit gracefully on filter error
+      }
+      
+      this.logger.info('Found tool results in user message', {
+        slackMessageIndex,
+        sessionKey,
+        toolResultCount: toolResults.length,
+        toolResultIds: toolResults.map((result: any) => result?.tool_use_id).filter(Boolean),
+        contentTypes: message.message.content.map((part: any) => part?.type).filter(Boolean)
+      });
 
-    for (const toolResult of toolResults) {
-      await this.processToolResult(toolResult, sessionKey, slackMessageIndex, channel, threadTs, say);
+      // Process each tool result with individual error handling
+      for (let i = 0; i < toolResults.length; i++) {
+        const toolResult = toolResults[i];
+        try {
+          await this.processToolResult(toolResult, sessionKey, slackMessageIndex, channel, threadTs, say);
+        } catch (toolResultError: any) {
+          this.logger.error('Error processing individual tool result', {
+            error: toolResultError.message,
+            sessionKey,
+            slackMessageIndex,
+            toolResultIndex: i,
+            toolUseId: toolResult?.tool_use_id
+          });
+          
+          // Continue processing other tool results even if one fails
+          continue;
+        }
+        
+        // Cleanup tool result reference after processing
+        toolResults[i] = null;
+      }
+      
+      // Final cleanup of tool results array
+      toolResults.length = 0;
+      
+    } catch (criticalError: any) {
+      this.logger.error('Critical error in handleUserMessage', {
+        error: criticalError.message,
+        stack: criticalError.stack,
+        sessionKey,
+        slackMessageIndex
+      });
+      
+      // Last resort cleanup and recovery
+      try {
+        // Attempt to notify about the error
+        await say({
+          text: '❌ *Error processing user message with file content.*\n> Please try again or contact support if the issue persists.',
+          thread_ts: threadTs,
+        });
+      } catch (notificationError: any) {
+        this.logger.error('Critical: Failed to send error notification in handleUserMessage', {
+          error: notificationError.message,
+          sessionKey
+        });
+      }
     }
   }
 
@@ -885,42 +940,546 @@ export class SlackHandler {
     threadTs: string,
     say: any
   ): Promise<void> {
-    this.logger.info('Processing individual tool result', {
-      slackMessageIndex,
-      sessionKey,
-      toolUseId: toolResult.tool_use_id,
-      hasContent: !!toolResult.content,
-      contentLength: toolResult.content?.length || 0,
-      contentPreview: toolResult.content?.substring(0, 200) + (toolResult.content?.length > 200 ? '...' : ''),
-      isError: toolResult.is_error
-    });
+    try {
+      this.logger.info('Processing individual tool result', {
+        slackMessageIndex,
+        sessionKey,
+        toolUseId: toolResult.tool_use_id,
+        hasContent: !!toolResult.content,
+        contentLength: toolResult.content?.length || 0,
+        contentPreview: toolResult.content?.substring(0, 200) + (toolResult.content?.length > 200 ? '...' : ''),
+        isError: toolResult.is_error
+      });
 
-    // For now, just extract and display the content
-    // TODO: Add security validation, content formatting, and display logic
-    if (toolResult.content && typeof toolResult.content === 'string') {
-      const displayContent = this.extractToolResultContent(toolResult);
-      if (displayContent) {
+      // Check if this tool result should be displayed (only Read tool results)
+      if (!this.shouldDisplayToolResult(toolResult)) {
+        this.logger.debug('Skipping tool result display (not a Read tool result)', {
+          slackMessageIndex,
+          sessionKey,
+          toolUseId: toolResult.tool_use_id
+        });
+        return;
+      }
+
+      // Enhanced content processing with formatting and display logic
+      if (toolResult.content && typeof toolResult.content === 'string') {
+        let displayContent: string | null = null;
+        
+        try {
+          displayContent = this.displayFileContent(toolResult.content, toolResult.tool_use_id);
+        } catch (contentError: any) {
+          this.logger.error('Error processing file content', {
+            error: contentError.message,
+            sessionKey,
+            toolUseId: toolResult.tool_use_id,
+            contentLength: toolResult.content.length
+          });
+          
+          // Graceful fallback for content processing errors
+          displayContent = this.createContentProcessingErrorFallback(contentError.message);
+        }
+        
+        if (displayContent) {
+          try {
+            // Rate limiting for large content to prevent Slack API rate limits
+            await this.applyRateLimiting(toolResult.content.length);
+            
+            await say({
+              text: displayContent,
+              thread_ts: threadTs,
+            });
+            
+            this.logger.debug('Successfully sent tool result content to Slack', {
+              sessionKey,
+              toolUseId: toolResult.tool_use_id,
+              displayContentLength: displayContent.length
+            });
+            
+          } catch (slackError: any) {
+            this.logger.error('Error sending content to Slack', {
+              error: slackError.message,
+              sessionKey,
+              toolUseId: toolResult.tool_use_id
+            });
+            
+            // Attempt to send a simplified error message
+            try {
+              await say({
+                text: this.createSlackSendErrorFallback(),
+                thread_ts: threadTs,
+              });
+            } catch (fallbackError: any) {
+              this.logger.error('Critical: Failed to send fallback error message', {
+                error: fallbackError.message,
+                sessionKey
+              });
+            }
+          }
+        }
+      }
+    } catch (criticalError: any) {
+      this.logger.error('Critical error in processToolResult', {
+        error: criticalError.message,
+        stack: criticalError.stack,
+        sessionKey,
+        toolUseId: toolResult?.tool_use_id
+      });
+      
+      // Last resort fallback - try to indicate something went wrong
+      try {
         await say({
-          text: displayContent,
+          text: '❌ *An unexpected error occurred while processing file content.*',
           thread_ts: threadTs,
+        });
+      } catch (lastResortError: any) {
+        this.logger.error('Critical: Complete failure in error handling', {
+          error: lastResortError.message,
+          sessionKey
         });
       }
     }
   }
 
+  private isSafeToDisplay(content: string, filePath?: string): { safe: boolean; reason?: string } {
+    // Check file path safety first if provided
+    if (filePath && !this.isPathSafe(filePath)) {
+      return { safe: false, reason: 'Unsafe file path detected' };
+    }
+
+    // Comprehensive credential detection patterns
+    const credentialPatterns = [
+      // API Keys
+      { pattern: /(?:api_key|apikey|api-key)[\s]*[:=][\s]*['"]*([a-zA-Z0-9_-]{20,})['"]*\s*$/im, type: 'API Key' },
+      { pattern: /['"](sk-[a-zA-Z0-9]{20,}|pk-[a-zA-Z0-9]{20,})['"]/g, type: 'Stripe Key' },
+      { pattern: /['"](xoxb-[0-9]{11,13}-[0-9]{11,13}-[a-zA-Z0-9]{24})['"]/g, type: 'Slack Bot Token' },
+      { pattern: /['"](xoxp-[0-9]{11,13}-[0-9]{11,13}-[a-zA-Z0-9]{24})['"]/g, type: 'Slack User Token' },
+      { pattern: /['"](xapp-[0-9]{1}-[A-Z0-9]{11}-[0-9]{12}-[a-f0-9]{64})['"]/g, type: 'Slack App Token' },
+      
+      // JWT Tokens
+      { pattern: /eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*/g, type: 'JWT Token' },
+      
+      // AWS Credentials
+      { pattern: /AKIA[0-9A-Z]{16}/g, type: 'AWS Access Key' },
+      { pattern: /(?:aws_secret_access_key|secret_key)[\s]*[:=][\s]*['"]*([a-zA-Z0-9+/]{40})['"]*\s*$/im, type: 'AWS Secret Key' },
+      
+      // GitHub Tokens
+      { pattern: /ghp_[a-zA-Z0-9]{36}/g, type: 'GitHub Personal Access Token' },
+      { pattern: /gho_[a-zA-Z0-9]{36}/g, type: 'GitHub OAuth Token' },
+      { pattern: /ghu_[a-zA-Z0-9]{36}/g, type: 'GitHub User-to-Server Token' },
+      { pattern: /ghs_[a-zA-Z0-9]{36}/g, type: 'GitHub Server-to-Server Token' },
+      { pattern: /ghr_[a-zA-Z0-9]{36}/g, type: 'GitHub Refresh Token' },
+      
+      // Private Keys
+      { pattern: /-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/gi, type: 'Private Key' },
+      { pattern: /-----BEGIN (CERTIFICATE|PUBLIC KEY)-----/gi, type: 'Certificate/Public Key' },
+      
+      // Database URLs and Connection Strings
+      { pattern: /postgres:\/\/[^:\s]+:[^@\s]+@[^\/\s]+\/[^\s]+/gi, type: 'PostgreSQL Connection String' },
+      { pattern: /mysql:\/\/[^:\s]+:[^@\s]+@[^\/\s]+\/[^\s]+/gi, type: 'MySQL Connection String' },
+      { pattern: /mongodb(\+srv)?:\/\/[^:\s]+:[^@\s]+@[^\/\s]+\/[^\s]+/gi, type: 'MongoDB Connection String' },
+      
+      // Generic patterns
+      { pattern: /(?:password|pwd|pass)[\s]*[:=][\s]*['"]*([a-zA-Z0-9!@#$%^&*()_+-=]{8,})['"]*\s*$/im, type: 'Password' },
+      { pattern: /(?:secret|token|key)[\s]*[:=][\s]*['"]*([a-zA-Z0-9_-]{32,})['"]*\s*$/im, type: 'Generic Secret' },
+      { pattern: /['"]((?:[0-9a-fA-F]{2}){32,})['"]/g, type: 'Long Hex String' },
+    ];
+
+    // Check each pattern against the content
+    for (const { pattern, type } of credentialPatterns) {
+      if (pattern.test(content)) {
+        this.logger.warn('Security: Blocked content containing credentials', { 
+          type, 
+          contentLength: content.length,
+          filePath: filePath || 'unknown'
+        });
+        return { safe: false, reason: `Content contains ${type}` };
+      }
+    }
+
+    // Additional heuristics for suspicious content
+    const suspiciousPatterns = [
+      // Base64 encoded strings that might be credentials (long ones)
+      { pattern: /^[A-Za-z0-9+/]{100,}={0,2}$/m, type: 'Long Base64 String' },
+      
+      // Multiple key-value pairs that look like config
+      { pattern: /((?:api_key|secret|token|password|key)[\s]*[:=][\s]*['"]*[a-zA-Z0-9_-]{10,}['"]*\s*){3,}/im, type: 'Multiple Secrets' },
+      
+      // Environment variable exports with secrets
+      { pattern: /export\s+[A-Z_]+(?:SECRET|KEY|TOKEN|PASSWORD)\s*=\s*['"]*[a-zA-Z0-9_-]{10,}['"]*$/im, type: 'Environment Secret Export' }
+    ];
+
+    for (const { pattern, type } of suspiciousPatterns) {
+      if (pattern.test(content)) {
+        this.logger.warn('Security: Blocked suspicious content', { 
+          type, 
+          contentLength: content.length,
+          filePath: filePath || 'unknown'
+        });
+        return { safe: false, reason: `Content contains ${type}` };
+      }
+    }
+
+    return { safe: true };
+  }
+
+  private isPathSafe(filePath: string): boolean {
+    // Directory traversal protection
+    const dangerousPatterns = [
+      /\.\./g,           // Parent directory traversal
+      /\0/g,             // Null bytes
+      /[<>|]/g,          // Command injection characters
+      /^\/etc\//i,       // System config files
+      /^\/proc\//i,      // System process files
+      /^\/sys\//i,       // System files
+      /^\/dev\//i,       // Device files
+      /\.ssh\//i,        // SSH keys
+      /\.aws\//i,        // AWS credentials
+      /\.env/i,          // Environment files
+      /id_rsa|id_dsa|id_ecdsa|id_ed25519/i, // SSH private keys
+    ];
+
+    // Check for dangerous patterns
+    for (const pattern of dangerousPatterns) {
+      if (pattern.test(filePath)) {
+        this.logger.warn('Security: Blocked unsafe file path', { 
+          filePath,
+          pattern: pattern.toString()
+        });
+        return false;
+      }
+    }
+
+    // Normalize path to check for encoded traversals
+    try {
+      const normalized = decodeURIComponent(filePath);
+      if (normalized !== filePath && dangerousPatterns.some(pattern => pattern.test(normalized))) {
+        this.logger.warn('Security: Blocked encoded unsafe file path', { 
+          filePath,
+          normalized
+        });
+        return false;
+      }
+    } catch (error) {
+      // If decoding fails, be conservative and block
+      this.logger.warn('Security: Blocked path with decoding error', { filePath });
+      return false;
+    }
+
+    return true;
+  }
+
+  private shouldDisplayToolResult(toolResult: any): boolean {
+    // Only display results from Read tool operations
+    // The tool_use_id should contain information about which tool was used
+    // For now, we'll display all tool results but this can be enhanced
+    // to specifically filter for Read tool results if needed
+    
+    // Check if it's an error result - don't display error content as file content
+    if (toolResult.is_error) {
+      this.logger.debug('Skipping error tool result', { 
+        toolUseId: toolResult.tool_use_id,
+        isError: toolResult.is_error
+      });
+      return false;
+    }
+
+    // For Phase 3, display all non-error tool results
+    // In the future, this could be enhanced to specifically detect Read tool results
+    return true;
+  }
+
+  private getLanguageFromPath(filePath?: string): string {
+    if (!filePath) return '';
+    
+    const extension = filePath.split('.').pop()?.toLowerCase();
+    const languageMap: Record<string, string> = {
+      // JavaScript/TypeScript
+      'js': 'javascript',
+      'jsx': 'javascript',
+      'ts': 'typescript',
+      'tsx': 'typescript',
+      
+      // Python
+      'py': 'python',
+      'pyw': 'python',
+      
+      // Web technologies
+      'html': 'html',
+      'htm': 'html',
+      'css': 'css',
+      'scss': 'scss',
+      'sass': 'sass',
+      'less': 'less',
+      
+      // Config files
+      'json': 'json',
+      'yaml': 'yaml',
+      'yml': 'yaml',
+      'xml': 'xml',
+      'toml': 'toml',
+      
+      // Shell/Scripts
+      'sh': 'bash',
+      'bash': 'bash',
+      'zsh': 'bash',
+      'fish': 'bash',
+      'ps1': 'powershell',
+      
+      // Programming languages
+      'java': 'java',
+      'c': 'c',
+      'cpp': 'cpp',
+      'cc': 'cpp',
+      'cxx': 'cpp',
+      'h': 'c',
+      'hpp': 'cpp',
+      'cs': 'csharp',
+      'php': 'php',
+      'rb': 'ruby',
+      'go': 'go',
+      'rs': 'rust',
+      'swift': 'swift',
+      'kt': 'kotlin',
+      
+      // Markup/Documentation
+      'md': 'markdown',
+      'markdown': 'markdown',
+      'rst': 'rst',
+      'tex': 'latex',
+      
+      // Data formats
+      'csv': 'csv',
+      'tsv': 'csv',
+      'sql': 'sql',
+      
+      // Other
+      'dockerfile': 'dockerfile',
+      'makefile': 'makefile',
+      'r': 'r',
+      'R': 'r'
+    };
+
+    return languageMap[extension || ''] || '';
+  }
+
+  private stripLineNumbers(content: string): string {
+    // First, remove system reminder blocks (which can span multiple lines)
+    let cleanContent = content.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '');
+    
+    // Then strip line number prefixes line by line
+    return cleanContent
+      .split('\n')
+      .map(line => {
+        // Match line number prefix pattern and remove it
+        const match = line.match(/^\s*\d+→(.*)$/);
+        return match ? match[1] : line;
+      })
+      .join('\n')
+      .trim(); // Remove extra whitespace
+  }
+
+  private truncateContent(content: string, maxLength: number = 400): { truncated: string; wasTruncated: boolean } {
+    if (content.length <= maxLength) {
+      return { truncated: content, wasTruncated: false };
+    }
+
+    // Try to truncate at a smart breakpoint (line ending, sentence ending, word boundary)
+    let truncateAt = maxLength;
+    
+    // Look for line breaks near the limit
+    const nearbyNewline = content.lastIndexOf('\n', maxLength);
+    if (nearbyNewline > maxLength * 0.7) { // At least 70% of content
+      truncateAt = nearbyNewline;
+    } else {
+      // Look for sentence endings
+      const nearbySentenceEnd = Math.max(
+        content.lastIndexOf('. ', maxLength),
+        content.lastIndexOf('.\n', maxLength),
+        content.lastIndexOf(';\n', maxLength)
+      );
+      if (nearbySentenceEnd > maxLength * 0.8) { // At least 80% of content
+        truncateAt = nearbySentenceEnd + 1;
+      } else {
+        // Look for word boundaries
+        const nearbySpace = content.lastIndexOf(' ', maxLength);
+        if (nearbySpace > maxLength * 0.9) { // At least 90% of content
+          truncateAt = nearbySpace;
+        }
+      }
+    }
+
+    const truncated = content.substring(0, truncateAt).trim();
+    return { truncated, wasTruncated: true };
+  }
+
+  private displayFileContent(content: string, toolUseId?: string): string | null {
+    try {
+      if (!content) return null;
+
+      // 50KB memory limit protection - block oversized content early
+      const MAX_CONTENT_SIZE = 50 * 1024; // 50KB
+      if (content.length > MAX_CONTENT_SIZE) {
+        const originalSize = content.length;
+        this.logger.warn('Content exceeds size limit', {
+          contentLength: originalSize,
+          maxSize: MAX_CONTENT_SIZE,
+          toolUseId: toolUseId || 'unknown'
+        });
+        
+        // Cleanup reference to large content immediately
+        content = '';
+        
+        return this.createOversizedContentFallback(originalSize, MAX_CONTENT_SIZE);
+      }
+
+      this.logger.debug('Displaying file content', {
+        contentType: typeof content,
+        contentLength: content.length,
+        toolUseId: toolUseId || 'unknown'
+      });
+
+      // Security validation with cleanup on failure
+      let safetyCheck: { safe: boolean; reason?: string };
+      try {
+        safetyCheck = this.isSafeToDisplay(content);
+      } catch (securityError: any) {
+        this.logger.error('Security validation failed', {
+          error: securityError.message,
+          contentLength: content.length,
+          toolUseId: toolUseId || 'unknown'
+        });
+        
+        // Cleanup content reference on security error
+        content = '';
+        
+        return this.createSecurityBlockedFallback('Security validation error');
+      }
+      
+      if (!safetyCheck.safe) {
+        this.logger.warn('Security: Blocked unsafe content', {
+          reason: safetyCheck.reason,
+          contentLength: content.length,
+          toolUseId: toolUseId || 'unknown'
+        });
+        
+        // Cleanup content reference after security block
+        content = '';
+        
+        return this.createSecurityBlockedFallback(safetyCheck.reason || 'Unknown security issue');
+      }
+
+      // Extract file path from content if it looks like a Read tool result
+      // This is a heuristic - actual file path extraction would need Claude SDK integration
+      const filePath = this.extractFilePathFromContent(content);
+      const language = this.getLanguageFromPath(filePath || undefined);
+      
+      // Strip line numbers from Claude Code Read tool output
+      const cleanContent = this.stripLineNumbers(content);
+      
+      // Truncate content with smart line-break handling
+      const { truncated, wasTruncated } = this.truncateContent(cleanContent, 35000);
+      
+      // Format as code block with language hint if available
+      let formattedContent = '';
+      if (language) {
+        // Slack doesn't support language-specific syntax highlighting in code blocks,
+        // but we can include the language as a comment for context
+        formattedContent = `\`\`\`\n${truncated}\n\`\`\``;
+      } else {
+        formattedContent = `\`\`\`\n${truncated}\n\`\`\``;
+      }
+
+      // Add truncation indicator
+      if (wasTruncated) {
+        formattedContent += `\n_... (showing first ${truncated.length} of ${cleanContent.length} characters)_`;
+      }
+
+      // Add file path if detected
+      let header = '📄 *File Content:*';
+      if (filePath) {
+        header = `📄 *File Content:* \`${filePath}\``;
+      }
+
+      // Cleanup content reference before returning
+      content = '';
+      
+      return `${header}\n${formattedContent}`;
+      
+    } catch (formatError: any) {
+      this.logger.error('Critical error in displayFileContent', {
+        error: formatError.message,
+        stack: formatError.stack,
+        contentLength: content?.length || 0,
+        toolUseId: toolUseId || 'unknown'
+      });
+      
+      // Cleanup content reference on error
+      content = '';
+      
+      // Return a safe fallback message
+      return this.createContentProcessingErrorFallback(formatError.message);
+    }
+  }
+
+  private extractFilePathFromContent(content: string): string | null {
+    // This is a heuristic to extract file paths from Read tool results
+    // In a full implementation, this would come from the Claude SDK context
+    
+    // Look for common file path patterns at the start of content
+    const lines = content.split('\n').slice(0, 3); // Check first 3 lines
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      
+      // Skip line numbers or empty lines
+      if (!trimmed || /^\d+→/.test(trimmed)) continue;
+      
+      // Look for path-like strings
+      if (trimmed.includes('/') && !trimmed.includes(' ') && trimmed.length > 3) {
+        // Basic file path validation
+        if (trimmed.startsWith('/') || trimmed.includes('.')) {
+          return trimmed;
+        }
+      }
+    }
+    
+    return null;
+  }
+
+  private async applyRateLimiting(contentLength: number): Promise<void> {
+    // Rate limiting delays for large content to prevent Slack API rate limits
+    if (contentLength > 1000) {
+      const delayMs = 500; // 500ms delay for content over 1000 characters
+      this.logger.debug('Applying rate limiting delay for large content', {
+        contentLength,
+        delayMs
+      });
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  private createOversizedContentFallback(actualSize: number, maxSize: number): string {
+    const sizeMB = (actualSize / (1024 * 1024)).toFixed(2);
+    const maxSizeMB = (maxSize / (1024 * 1024)).toFixed(2);
+    
+    return `📏 *File too large to display*\n> File size: ${sizeMB}MB (max: ${maxSizeMB}MB)\n> File content exceeds size limits and cannot be displayed in Slack.\n> Consider using file sharing or breaking the content into smaller parts.`;
+  }
+
+  private createSecurityBlockedFallback(reason: string): string {
+    return `🔒 *Content blocked for security*\n> ${reason}\n> File content contains sensitive information that cannot be displayed.`;
+  }
+
+  private createContentProcessingErrorFallback(errorMessage: string): string {
+    return `⚠️ *Error processing file content*\n> Processing error: ${errorMessage}\n> Unable to format file content for display. The file may contain invalid characters or be corrupted.`;
+  }
+
+  private createSlackSendErrorFallback(): string {
+    return `📤 *Error sending content to Slack*\n> Unable to display file content due to messaging error.\n> This may be due to content length, formatting issues, or temporary Slack API problems.`;
+  }
+
   private extractToolResultContent(toolResult: any): string | null {
-    if (!toolResult.content) return null;
-
-    // Basic content extraction - will be enhanced with security and formatting
-    const content = toolResult.content;
-    this.logger.debug('Extracting tool result content', {
-      contentType: typeof content,
-      contentLength: content.length,
-      isError: toolResult.is_error
-    });
-
-    // For now, just return a simple formatted version
-    return `📄 *Tool Result Content:*\n\`\`\`\n${content.substring(0, 400)}${content.length > 400 ? '\n... (truncated)' : ''}\n\`\`\``;
+    // Deprecated method - now using displayFileContent for enhanced formatting
+    return this.displayFileContent(toolResult.content, toolResult.tool_use_id);
   }
 
   private formatMessage(text: string, isFinal: boolean): string {
