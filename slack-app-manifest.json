@@ -20,12 +20,15 @@
     "scopes": {
       "bot": [
         "app_mentions:read",
+        "channels:read",
         "channels:history",
+        "groups:read",
         "chat:write",
         "chat:write.public",
         "im:history",
         "im:read",
         "im:write",
+        "mpim:read",
         "users:read",
         "reactions:read",
         "reactions:write"
