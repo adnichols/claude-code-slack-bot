@@ -6,6 +6,8 @@ This is a TypeScript-based Slack bot that integrates with the Claude Code SDK to
 
 The bot allows users to interact with Claude Code through Slack, providing real-time coding assistance, file analysis, code reviews, and project management capabilities. It supports both direct messages and channel conversations, with sophisticated working directory management and task tracking.
 
+When doing work - think hard
+
 ## Architecture
 
 ### Core Components
@@ -192,6 +194,77 @@ PERMISSION_AUTO_APPROVE_LOW_RISK=false
 - **Action-level**: 12 hours - 2 days depending on risk
 - **Command-level**: 6-24 hours depending on risk
 - Automatically checks for existing approvals before prompting
+
+#### Local Configuration Integration
+The bot supports project-specific permission configuration through `.claude/settings.json` files:
+
+**Directory Traversal**: The system searches up the directory tree from the working directory to find `.claude` directories with configuration files.
+
+**Configuration Files**:
+- **`.claude/settings.json`** - Team-wide settings (should be committed to git)
+- **`.claude/settings.local.json`** - Personal overrides (should be in .gitignore)
+
+**Example Team Configuration** (`.claude/settings.json`):
+```json
+{
+  "permissions": {
+    "autoApprove": [
+      "git status",
+      "npm install",
+      "npm run build"
+    ],
+    "tools": {
+      "bash": {
+        "enabled": true,
+        "autoApprove": false
+      },
+      "git": {
+        "enabled": true,
+        "commands": [
+          "git log --oneline -10",
+          "git diff HEAD"
+        ]
+      }
+    }
+  },
+  "security": {
+    "maxConfigFileSize": 1048576,
+    "blockedCommands": [
+      "rm -rf",
+      "sudo rm",
+      "chmod 777"
+    ]
+  }
+}
+```
+
+**Example Personal Overrides** (`.claude/settings.local.json`):
+```json
+{
+  "permissions": {
+    "autoApprove": [
+      "git commit -m",
+      "npm run dev"
+    ],
+    "tools": {
+      "bash": {
+        "autoApprove": true
+      }
+    }
+  }
+}
+```
+
+**Permission Flow**:
+1. **Local Config Check**: First checks local configuration for auto-approval
+2. **Existing Approval Check**: Then checks for previously granted permissions  
+3. **Interactive Prompt**: Finally prompts user if no pre-approval exists
+
+**Security Features**:
+- Configuration file size limits (1MB default)
+- Path validation to prevent traversal attacks
+- Command blocking with security patterns
+- Graceful fallback on configuration errors
 
 ### MCP Server Management
 ```

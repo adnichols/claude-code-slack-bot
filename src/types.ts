@@ -15,3 +15,34 @@ export interface WorkingDirectoryConfig {
   directory: string;
   setAt: Date;
 }
+
+export interface LocalPermissionConfig {
+  permissions?: {
+    autoApprove?: string[];
+    tools?: {
+      [toolName: string]: {
+        enabled?: boolean;
+        autoApprove?: boolean;
+        commands?: string[];
+      };
+    };
+  };
+  security?: {
+    maxConfigFileSize?: number;
+    allowedPaths?: string[];
+    blockedCommands?: string[];
+  };
+}
+
+export interface LocalConfigResult {
+  config: LocalPermissionConfig;
+  source: 'team' | 'personal' | 'merged';
+  loadedFrom: string[];
+}
+
+export interface PermissionCheckResult {
+  isApproved: boolean;
+  source: 'local-config' | 'existing-approval' | 'none';
+  matchType?: 'exact' | 'tool' | 'pattern';
+  configPath?: string;
+}
