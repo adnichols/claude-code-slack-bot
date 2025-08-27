@@ -232,20 +232,63 @@ export class SlackHandler {
         user
       };
       
+      let slackMessageCount = 0;
+      
       for await (const message of this.claudeHandler.streamQuery(finalPrompt, session, abortController, workingDirectory, slackContext)) {
         if (abortController.signal.aborted) break;
 
-        this.logger.debug('Received message from Claude SDK', {
+        slackMessageCount++;
+
+        // Comprehensive SDK message logging from Slack handler perspective
+        this.logger.debug(`Slack Processing SDK Message #${slackMessageCount}`, {
+          slackMessageIndex: slackMessageCount,
           type: message.type,
           subtype: (message as any).subtype,
-          message: message,
+          sessionKey,
+          sessionId: session?.sessionId,
+          messageStructure: {
+            keys: Object.keys(message),
+            hasMessage: !!(message as any).message,
+            messageKeys: (message as any).message ? Object.keys((message as any).message) : [],
+            hasContent: !!(message as any).message?.content,
+            contentLength: (message as any).message?.content?.length || 0
+          },
+          fullMessageSample: JSON.stringify(message, null, 2).substring(0, 1000) + (JSON.stringify(message).length > 1000 ? '...' : '')
         });
 
         if (message.type === 'assistant') {
+          const content = (message as any).message?.content || [];
+          
+          // Detailed analysis of assistant message content
+          this.logger.info('Assistant message content analysis', {
+            slackMessageIndex: slackMessageCount,
+            sessionKey,
+            contentParts: content.map((part: any, idx: number) => ({
+              index: idx,
+              type: part.type,
+              name: part.name,
+              id: part.id,
+              textPreview: part.text?.substring(0, 100) + (part.text?.length > 100 ? '...' : ''),
+              textLength: part.text?.length || 0,
+              hasInput: !!part.input
+            })),
+            totalTextLength: content.filter((p: any) => p.type === 'text').reduce((sum: number, p: any) => sum + (p.text?.length || 0), 0),
+            toolUseCount: content.filter((p: any) => p.type === 'tool_use').length,
+            textPartCount: content.filter((p: any) => p.type === 'text').length
+          });
+
           // Check if this is a tool use message
           const hasToolUse = message.message.content?.some((part: any) => part.type === 'tool_use');
           
           if (hasToolUse) {
+            this.logger.info('Processing tool use message', {
+              slackMessageIndex: slackMessageCount,
+              sessionKey,
+              toolNames: content.filter((p: any) => p.type === 'tool_use').map((p: any) => p.name),
+              hasTextAlso: content.some((p: any) => p.type === 'text'),
+              textWithToolUse: content.filter((p: any) => p.type === 'text').map((p: any) => p.text?.substring(0, 150))
+            });
+
             // Update status to show working
             if (statusMessageTs) {
               await this.app.client.chat.update({
@@ -264,49 +307,131 @@ export class SlackHandler {
             );
 
             if (todoTool) {
+              this.logger.info('Processing TodoWrite tool', {
+                slackMessageIndex: slackMessageCount,
+                sessionKey,
+                todoInput: todoTool.input
+              });
               await this.handleTodoUpdate(todoTool.input, sessionKey, session?.sessionId, channel, thread_ts || ts, say);
             }
 
             // For other tool use messages, format them immediately as new messages
             const toolContent = this.formatToolUse(message.message.content);
             if (toolContent) { // Only send if there's content (TodoWrite returns empty string)
+              this.logger.info('Sending tool use content to Slack', {
+                slackMessageIndex: slackMessageCount,
+                sessionKey,
+                contentPreview: toolContent.substring(0, 200),
+                contentLength: toolContent.length
+              });
               await say({
                 text: toolContent,
                 thread_ts: thread_ts || ts,
               });
+            } else {
+              this.logger.debug('Tool use generated no visible content', {
+                slackMessageIndex: slackMessageCount,
+                sessionKey
+              });
             }
           } else {
             // Handle regular text content
-            const content = this.extractTextContent(message);
-            if (content) {
-              currentMessages.push(content);
+            const textContent = this.extractTextContent(message);
+            this.logger.info('Processing text-only assistant message', {
+              slackMessageIndex: slackMessageCount,
+              sessionKey,
+              hasTextContent: !!textContent,
+              textLength: textContent?.length || 0,
+              textPreview: textContent?.substring(0, 200) + (textContent && textContent.length > 200 ? '...' : ''),
+              currentMessageCount: currentMessages.length
+            });
+
+            if (textContent) {
+              currentMessages.push(textContent);
               
               // Send each new piece of content as a separate message
-              const formatted = this.formatMessage(content, false);
+              const formatted = this.formatMessage(textContent, false);
+              this.logger.debug('Sending formatted text to Slack', {
+                slackMessageIndex: slackMessageCount,
+                sessionKey,
+                originalLength: textContent.length,
+                formattedLength: formatted.length,
+                formattedPreview: formatted.substring(0, 200)
+              });
+              
               await say({
                 text: formatted,
                 thread_ts: thread_ts || ts,
+              });
+            } else {
+              this.logger.debug('No text content extracted from assistant message', {
+                slackMessageIndex: slackMessageCount,
+                sessionKey,
+                messageContent: content
               });
             }
           }
         } else if (message.type === 'result') {
-          this.logger.info('Received result from Claude SDK', {
+          const resultData = message as any;
+          this.logger.info('Result message comprehensive analysis', {
+            slackMessageIndex: slackMessageCount,
+            sessionKey,
             subtype: message.subtype,
-            hasResult: message.subtype === 'success' && !!(message as any).result,
-            totalCost: (message as any).total_cost_usd,
-            duration: (message as any).duration_ms,
+            hasResult: message.subtype === 'success' && !!resultData.result,
+            resultLength: resultData.result?.length || 0,
+            resultPreview: resultData.result?.substring(0, 300) + (resultData.result?.length > 300 ? '...' : ''),
+            totalCost: resultData.total_cost_usd,
+            duration: resultData.duration_ms,
+            allResultKeys: Object.keys(resultData),
+            currentMessageCount: currentMessages.length,
+            finalResult: message.subtype === 'success'
           });
           
-          if (message.subtype === 'success' && (message as any).result) {
-            const finalResult = (message as any).result;
-            if (finalResult && !currentMessages.includes(finalResult)) {
+          if (message.subtype === 'success' && resultData.result) {
+            const finalResult = resultData.result;
+            const alreadyIncluded = currentMessages.includes(finalResult);
+            
+            this.logger.info('Processing final result', {
+              slackMessageIndex: slackMessageCount,
+              sessionKey,
+              resultAlreadyIncluded: alreadyIncluded,
+              resultComparisonPreviews: currentMessages.map(msg => msg.substring(0, 100)),
+              finalResultPreview: finalResult.substring(0, 100)
+            });
+
+            if (finalResult && !alreadyIncluded) {
               const formatted = this.formatMessage(finalResult, true);
+              this.logger.info('Sending final result to Slack', {
+                slackMessageIndex: slackMessageCount,
+                sessionKey,
+                originalLength: finalResult.length,
+                formattedLength: formatted.length
+              });
+              
               await say({
                 text: formatted,
                 thread_ts: thread_ts || ts,
               });
+            } else if (alreadyIncluded) {
+              this.logger.debug('Skipping final result - already sent', {
+                slackMessageIndex: slackMessageCount,
+                sessionKey
+              });
             }
           }
+        } else if (message.type === 'user') {
+          // Handle user messages containing tool results (file content display)
+          await this.handleUserMessage(message, sessionKey, slackMessageCount, channel, thread_ts || ts, say);
+        } else {
+          // Log any other message types we haven't seen
+          this.logger.info('Unexpected message type received', {
+            slackMessageIndex: slackMessageCount,
+            sessionKey,
+            messageType: message.type,
+            messageSubtype: (message as any).subtype,
+            messageKeys: Object.keys(message),
+            fullMessage: JSON.stringify(message, null, 2)
+          });
         }
       }
 
@@ -712,6 +837,90 @@ export class SlackHandler {
     } catch (error) {
       this.logger.error('Failed to handle channel join', error);
     }
+  }
+
+  private async handleUserMessage(
+    message: any,
+    sessionKey: string,
+    slackMessageIndex: number,
+    channel: string,
+    threadTs: string,
+    say: any
+  ): Promise<void> {
+    this.logger.info('Processing user message with potential tool results', {
+      slackMessageIndex,
+      sessionKey,
+      hasMessage: !!message.message,
+      messageKeys: message.message ? Object.keys(message.message) : [],
+      hasContent: !!message.message?.content,
+      contentLength: message.message?.content?.length || 0
+    });
+
+    if (!message.message?.content || !Array.isArray(message.message.content)) {
+      this.logger.debug('User message has no content array', { slackMessageIndex, sessionKey });
+      return;
+    }
+
+    // Look for tool_result content in the message
+    const toolResults = message.message.content.filter((part: any) => part.type === 'tool_result');
+    
+    this.logger.info('Found tool results in user message', {
+      slackMessageIndex,
+      sessionKey,
+      toolResultCount: toolResults.length,
+      toolResultIds: toolResults.map((result: any) => result.tool_use_id),
+      contentTypes: message.message.content.map((part: any) => part.type)
+    });
+
+    for (const toolResult of toolResults) {
+      await this.processToolResult(toolResult, sessionKey, slackMessageIndex, channel, threadTs, say);
+    }
+  }
+
+  private async processToolResult(
+    toolResult: any,
+    sessionKey: string,
+    slackMessageIndex: number,
+    channel: string,
+    threadTs: string,
+    say: any
+  ): Promise<void> {
+    this.logger.info('Processing individual tool result', {
+      slackMessageIndex,
+      sessionKey,
+      toolUseId: toolResult.tool_use_id,
+      hasContent: !!toolResult.content,
+      contentLength: toolResult.content?.length || 0,
+      contentPreview: toolResult.content?.substring(0, 200) + (toolResult.content?.length > 200 ? '...' : ''),
+      isError: toolResult.is_error
+    });
+
+    // For now, just extract and display the content
+    // TODO: Add security validation, content formatting, and display logic
+    if (toolResult.content && typeof toolResult.content === 'string') {
+      const displayContent = this.extractToolResultContent(toolResult);
+      if (displayContent) {
+        await say({
+          text: displayContent,
+          thread_ts: threadTs,
+        });
+      }
+    }
+  }
+
+  private extractToolResultContent(toolResult: any): string | null {
+    if (!toolResult.content) return null;
+
+    // Basic content extraction - will be enhanced with security and formatting
+    const content = toolResult.content;
+    this.logger.debug('Extracting tool result content', {
+      contentType: typeof content,
+      contentLength: content.length,
+      isError: toolResult.is_error
+    });
+
+    // For now, just return a simple formatted version
+    return `📄 *Tool Result Content:*\n\`\`\`\n${content.substring(0, 400)}${content.length > 400 ? '\n... (truncated)' : ''}\n\`\`\``;
   }
 
   private formatMessage(text: string, isFinal: boolean): string {
