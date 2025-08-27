@@ -1,0 +1,29 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "name": "John Doe",
+      "email": "john@example.com",
+      "preferences": {
+        "theme": "dark",
+        "notifications": true,
+        "language": "en"
+      }
+    },
+    {
+      "id": 2,
+      "name": "Jane Smith",
+      "email": "jane@example.com", 
+      "preferences": {
+        "theme": "light",
+        "notifications": false,
+        "language": "es"
+      }
+    }
+  ],
+  "settings": {
+    "app_version": "1.2.3",
+    "debug_mode": false,
+    "max_users": 1000
+  }
+}

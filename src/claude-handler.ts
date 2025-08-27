@@ -135,11 +135,26 @@ export class ClaudeHandler {
     });
 
     try {
+      let messageCount = 0;
+      let pendingToolUses: Map<string, { toolName: string, timestamp: number }> = new Map();
+      
       for await (const message of query({
         prompt,
         abortController: abortController || new AbortController(),
         options,
       })) {
+        messageCount++;
+        
+        // Comprehensive message structure logging
+        this.logger.debug(`SDK Message #${messageCount}`, {
+          messageIndex: messageCount,
+          type: message.type,
+          subtype: (message as any).subtype,
+          fullMessage: JSON.stringify(message, null, 2),
+          messageKeys: Object.keys(message),
+          timestamp: new Date().toISOString()
+        });
+
         if (message.type === 'system' && message.subtype === 'init') {
           if (session) {
             session.sessionId = message.session_id;
@@ -147,9 +162,99 @@ export class ClaudeHandler {
               sessionId: message.session_id,
               model: (message as any).model,
               tools: (message as any).tools?.length || 0,
+              messageIndex: messageCount,
             });
           }
         }
+
+        // Track tool use patterns for understanding tool result delivery
+        if (message.type === 'assistant' && (message as any).message?.content) {
+          const content = (message as any).message.content;
+          
+          // Log detailed assistant message structure
+          this.logger.debug('Assistant message analysis', {
+            messageIndex: messageCount,
+            contentLength: content.length,
+            contentTypes: content.map((part: any) => part.type),
+            hasToolUse: content.some((part: any) => part.type === 'tool_use'),
+            hasText: content.some((part: any) => part.type === 'text'),
+            textParts: content.filter((part: any) => part.type === 'text').map((part: any) => ({
+              text: part.text?.substring(0, 200) + (part.text?.length > 200 ? '...' : ''),
+              length: part.text?.length || 0
+            })),
+            toolUseParts: content.filter((part: any) => part.type === 'tool_use').map((part: any) => ({
+              name: part.name,
+              id: part.id,
+              hasInput: !!part.input
+            }))
+          });
+
+          // Track tool uses to understand result patterns
+          const toolUses = content.filter((part: any) => part.type === 'tool_use');
+          for (const toolUse of toolUses) {
+            if (toolUse.id && toolUse.name) {
+              pendingToolUses.set(toolUse.id, {
+                toolName: toolUse.name,
+                timestamp: Date.now()
+              });
+              this.logger.info('Tool use tracked', {
+                messageIndex: messageCount,
+                toolId: toolUse.id,
+                toolName: toolUse.name,
+                pendingCount: pendingToolUses.size
+              });
+            }
+          }
+
+          // Check if this message contains text that might be tool results
+          const textParts = content.filter((part: any) => part.type === 'text');
+          if (textParts.length > 0 && pendingToolUses.size > 0) {
+            this.logger.info('Potential tool result delivery', {
+              messageIndex: messageCount,
+              textPartCount: textParts.length,
+              pendingToolsCount: pendingToolUses.size,
+              pendingToolNames: Array.from(pendingToolUses.values()).map(t => t.toolName),
+              textSamples: textParts.map((part: any, idx: number) => ({
+                index: idx,
+                preview: part.text?.substring(0, 150) + (part.text?.length > 150 ? '...' : ''),
+                length: part.text?.length || 0
+              }))
+            });
+          }
+        }
+
+        // Check for any unexpected message types that might indicate tool results
+        if (!['assistant', 'user', 'result', 'system'].includes(message.type)) {
+          this.logger.info('UNEXPECTED: Found unknown message type', {
+            messageIndex: messageCount,
+            type: message.type,
+            fullMessage: JSON.stringify(message, null, 2)
+          });
+        }
+
+        // Log result messages comprehensively
+        if (message.type === 'result') {
+          this.logger.info('Result message analysis', {
+            messageIndex: messageCount,
+            subtype: message.subtype,
+            hasResult: message.subtype === 'success' && !!(message as any).result,
+            resultPreview: (message as any).result?.substring(0, 200) + ((message as any).result?.length > 200 ? '...' : ''),
+            totalCost: (message as any).total_cost_usd,
+            duration: (message as any).duration_ms,
+            allKeys: Object.keys(message)
+          });
+          
+          // Clear pending tool tracking on completion
+          if (pendingToolUses.size > 0) {
+            this.logger.info('Clearing pending tool uses on result', {
+              messageIndex: messageCount,
+              clearedCount: pendingToolUses.size,
+              toolNames: Array.from(pendingToolUses.values()).map(t => t.toolName)
+            });
+            pendingToolUses.clear();
+          }
+        }
+
         yield message;
       }
     } catch (error) {
