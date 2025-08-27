@@ -61,16 +61,23 @@ export class ClaudeHandler {
     
     // Add permission prompt server if we have Slack context
     if (slackContext) {
+      const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
       const permissionServer = {
         'permission-prompt': {
           command: 'npx',
           args: ['tsx', path.join(process.cwd(), 'src', 'permission-mcp-server.ts')],
           env: {
             SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN,
-            SLACK_CONTEXT: JSON.stringify(slackContext)
+            SLACK_CONTEXT: JSON.stringify({
+              ...slackContext,
+              workingDirectory,
+              requestId
+            })
           }
         }
       };
+      
+      this.logger.debug('Generated request ID for permission context', { requestId, workingDirectory });
       
       if (mcpServers) {
         options.mcpServers = { ...mcpServers, ...permissionServer };
@@ -82,19 +89,24 @@ export class ClaudeHandler {
     }
     
     if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
-      // Allow all MCP tools by default, plus permission prompt tool
+      // Allow all MCP tools by default, plus built-in tools and permission prompt tool
       const defaultMcpTools = this.mcpManager.getDefaultAllowedTools();
+      const builtInTools = ['Bash', 'Edit', 'Read', 'Write', 'Glob', 'Grep']; // Claude Code built-in tools
+      
+      const allAllowedTools = [...builtInTools, ...defaultMcpTools];
+      
       if (slackContext) {
-        defaultMcpTools.push('mcp__permission-prompt');
+        allAllowedTools.push('mcp__permission-prompt');
       }
-      if (defaultMcpTools.length > 0) {
-        options.allowedTools = defaultMcpTools;
+      
+      if (allAllowedTools.length > 0) {
+        options.allowedTools = allAllowedTools;
       }
       
       this.logger.debug('Added MCP configuration to options', {
         serverCount: Object.keys(options.mcpServers).length,
         servers: Object.keys(options.mcpServers),
-        allowedTools: defaultMcpTools,
+        allowedTools: allAllowedTools,
         hasSlackContext: !!slackContext,
       });
     }
@@ -106,7 +118,13 @@ export class ClaudeHandler {
       this.logger.debug('Starting new Claude conversation');
     }
 
-    this.logger.debug('Claude query options', options);
+    this.logger.debug('Claude query options', {
+      permissionMode: options.permissionMode,
+      permissionPromptToolName: options.permissionPromptToolName,
+      mcpServers: options.mcpServers ? Object.keys(options.mcpServers) : [],
+      allowedTools: options.allowedTools,
+      hasSlackContext: !!slackContext
+    });
     this.logger.info('About to call Claude SDK with:', {
       prompt: prompt.substring(0, 100) + (prompt.length > 100 ? '...' : ''),
       workingDirectory,

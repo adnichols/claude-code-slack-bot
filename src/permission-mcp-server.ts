@@ -10,6 +10,7 @@ import { WebClient } from '@slack/web-api';
 import { Logger } from './logger.js';
 import { PermissionFormatter, ApprovalScope } from './permission-formatter.js';
 import { config } from './config.js';
+import { localConfigReader } from './local-config-reader.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -292,10 +293,14 @@ class PermissionMCPServer {
   private async handlePermissionPrompt(params: PermissionRequest) {
     const { tool_name, input } = params;
     
+    logger.info('Permission prompt called!', { tool_name, input });
+    
     // Get Slack context from environment (passed by Claude handler)
     const slackContextStr = process.env.SLACK_CONTEXT;
     const slackContext = slackContextStr ? JSON.parse(slackContextStr) : {};
-    const { channel, threadTs: thread_ts, user } = slackContext;
+    const { channel, threadTs: thread_ts, user, workingDirectory, requestId } = slackContext;
+    
+    logger.info('Slack context for permission', { channel, thread_ts, user, workingDirectory, requestId });
     
     // Format the permission request
     const formattedPermission = PermissionFormatter.formatPermission(tool_name, input, config.permissions.defaultScope);
@@ -316,7 +321,63 @@ class PermissionMCPServer {
       };
     }
     
-    // Check for existing approval first
+    // Check local config for pre-approval first
+    if (workingDirectory) {
+      try {
+        const commandStr = typeof input === 'string' ? input : JSON.stringify(input);
+        const localConfigResult = await localConfigReader.isPreApproved(commandStr, tool_name, workingDirectory);
+        
+        if (localConfigResult.isApproved) {
+          logger.info('Auto-approved by local config', { 
+            tool_name, 
+            user, 
+            workingDirectory,
+            matchType: localConfigResult.matchType,
+            configPath: localConfigResult.configPath,
+            requestId
+          });
+          
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  behavior: 'allow',
+                  message: `Auto-approved by local config (${localConfigResult.matchType} match)`
+                })
+              }
+            ]
+          };
+        } else if (localConfigResult.source === 'local-config' && !localConfigResult.isApproved) {
+          // Explicitly blocked by local config
+          logger.warn('Explicitly blocked by local config', { 
+            tool_name, 
+            user, 
+            workingDirectory,
+            matchType: localConfigResult.matchType,
+            configPath: localConfigResult.configPath,
+            requestId
+          });
+          
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  behavior: 'deny',
+                  message: `Blocked by local config (${localConfigResult.matchType} match)`
+                })
+              }
+            ]
+          };
+        }
+      } catch (error) {
+        logger.error('Error checking local config, falling back to normal permission flow', { error, workingDirectory, tool_name, requestId });
+        // Continue to existing approval check on error (fail-secure)
+      }
+    }
+    
+    // Check for existing approval
     const existingApproval = this.checkExistingApproval(tool_name, user, channel, input, formattedPermission.scope);
     if (existingApproval) {
       logger.debug('Using existing approval', { 
