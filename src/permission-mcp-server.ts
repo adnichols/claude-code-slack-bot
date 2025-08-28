@@ -46,7 +46,7 @@ interface StoredApproval {
 
 class PermissionMCPServer {
   private server: Server;
-  private slack: WebClient;
+  private slack: SlackWebClient;
   private pendingApprovals = new Map<string, {
     resolve: (response: PermissionResponse) => void;
     reject: (error: Error) => void;
@@ -692,7 +692,7 @@ class PermissionMCPServer {
 export const permissionServer = new PermissionMCPServer();
 
 // Run if this file is executed directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   permissionServer.run().catch((error) => {
     logger.error('Permission MCP server error:', error);
     process.exit(1);
