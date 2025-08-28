@@ -1,20 +1,21 @@
-import { App } from '@slack/bolt';
-import { ClaudeHandler } from './claude-handler';
+import slackBolt, { type App as SlackApp } from '@slack/bolt';
+const { App } = slackBolt;
+import { ClaudeHandler } from './claude-handler.js';
 import { SDKMessage } from '@anthropic-ai/claude-code';
-import { Logger } from './logger';
-import { WorkingDirectoryManager } from './working-directory-manager';
-import { FileHandler, ProcessedFile } from './file-handler';
-import { TodoManager, Todo } from './todo-manager';
-import { McpManager } from './mcp-manager';
-import { permissionServer } from './permission-mcp-server';
-import { config } from './config';
-import { ErrorAnalyzer } from './error-analyzer';
-import { ErrorHandler } from './error-handler';
-import { MessageFormatter } from './message-formatter';
-import { ContentSecurity } from './content-security';
-import { ReactionManager } from './reaction-manager';
-import { CommandHandler } from './command-handler';
-import { PermissionHandler } from './handlers/permission-handler';
+import { Logger } from './logger.js';
+import { WorkingDirectoryManager } from './working-directory-manager.js';
+import { FileHandler, ProcessedFile } from './file-handler.js';
+import { TodoManager, Todo } from './todo-manager.js';
+import { McpManager } from './mcp-manager.js';
+import { permissionServer } from './permission-mcp-server.js';
+import { config } from './config.js';
+import { ErrorAnalyzer } from './error-analyzer.js';
+import { ErrorHandler } from './error-handler.js';
+import { MessageFormatter } from './message-formatter.js';
+import { ContentSecurity } from './content-security.js';
+import { ReactionManager } from './reaction-manager.js';
+import { CommandHandler } from './command-handler.js';
+import { PermissionHandler } from './handlers/permission-handler.js';
 
 interface MessageEvent {
   user: string;
@@ -34,7 +35,7 @@ interface MessageEvent {
 }
 
 export class SlackHandler {
-  private app: App;
+  private app: SlackApp;
   private claudeHandler: ClaudeHandler;
   private activeControllers: Map<string, AbortController> = new Map();
   private logger = new Logger('SlackHandler');
@@ -51,7 +52,7 @@ export class SlackHandler {
   private todoMessages: Map<string, string> = new Map(); // sessionKey -> messageTs
   private botUserId: string | null = null;
 
-  constructor(app: App, claudeHandler: ClaudeHandler, mcpManager: McpManager) {
+  constructor(app: SlackApp, claudeHandler: ClaudeHandler, mcpManager: McpManager) {
     this.app = app;
     this.claudeHandler = claudeHandler;
     this.mcpManager = mcpManager;

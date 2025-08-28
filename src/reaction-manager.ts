@@ -1,14 +1,15 @@
-import { App } from '@slack/bolt';
-import { Logger } from './logger';
-import { Todo } from './todo-manager';
+import slackBolt, { type App as SlackApp } from '@slack/bolt';
+const { App } = slackBolt;
+import { Logger } from './logger.js';
+import { Todo } from './todo-manager.js';
 
 export class ReactionManager {
-  private app: App;
+  private app: SlackApp;
   private logger = new Logger('ReactionManager');
   private currentReactions: Map<string, string> = new Map(); // sessionKey -> current emoji
   private originalMessages: Map<string, { channel: string; ts: string }> = new Map();
 
-  constructor(app: App) {
+  constructor(app: SlackApp) {
     this.app = app;
   }
 

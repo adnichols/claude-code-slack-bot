@@ -1,4 +1,4 @@
-import { Logger } from './logger';
+import { Logger } from './logger.js';
 
 export class MessageFormatter {
   private logger = new Logger('MessageFormatter');

@@ -6,7 +6,8 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { WebClient } from '@slack/web-api';
+import slackWebApi, { type WebClient as SlackWebClient } from '@slack/web-api';
+const { WebClient } = slackWebApi;
 import { Logger } from './logger.js';
 import { config, getSlackContext } from './config.js';
 import { PermissionFormatter, ApprovalScope } from './permission-formatter.js';

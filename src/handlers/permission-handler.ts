@@ -1,6 +1,7 @@
-import { App } from '@slack/bolt';
-import { Logger } from '../logger';
-import { permissionServer } from '../permission-mcp-server';
+import slackBolt, { type App as SlackApp } from '@slack/bolt';
+const { App } = slackBolt;
+import { Logger } from '../logger.js';
+import { permissionServer } from '../permission-mcp-server.js';
 
 export interface SlackPermissionContext {
   channel: string;
@@ -9,10 +10,10 @@ export interface SlackPermissionContext {
 }
 
 export class PermissionHandler {
-  private app: App;
+  private app: SlackApp;
   private logger = new Logger('PermissionHandler');
 
-  constructor(app: App) {
+  constructor(app: SlackApp) {
     this.app = app;
     this.setupPermissionHandlers();
   }

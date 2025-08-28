@@ -1,5 +1,5 @@
-import { Logger } from './logger';
-import { ErrorAnalyzer, ActionableError } from './error-analyzer';
+import { Logger } from './logger.js';
+import { ErrorAnalyzer, ActionableError } from './error-analyzer.js';
 
 export interface ErrorContext {
   operation: string;

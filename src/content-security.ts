@@ -1,5 +1,5 @@
-import { Logger } from './logger';
-import { MessageFormatter } from './message-formatter';
+import { Logger } from './logger.js';
+import { MessageFormatter } from './message-formatter.js';
 import * as path from 'path';
 
 export interface ContentSecurityResult {
