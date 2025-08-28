@@ -1,9 +1,10 @@
-import fetch from 'node-fetch';
+// Using native fetch (Node.js 18+)
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { Logger } from './logger';
 import { config } from './config';
+import { FileContentFormatter } from './file-content-formatter';
 
 export interface ProcessedFile {
   path: string;
@@ -17,6 +18,7 @@ export interface ProcessedFile {
 
 export class FileHandler {
   private logger = new Logger('FileHandler');
+  private formatter = new FileContentFormatter();
 
   async downloadAndProcessFiles(files: any[]): Promise<ProcessedFile[]> {
     const processedFiles: ProcessedFile[] = [];
@@ -55,7 +57,7 @@ export class FileHandler {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const buffer = await response.buffer();
+      const buffer = Buffer.from(await response.arrayBuffer());
       const tempDir = os.tmpdir();
       const tempPath = path.join(tempDir, `slack-file-${Date.now()}-${file.name}`);
       
@@ -86,7 +88,39 @@ export class FileHandler {
   }
 
   private isImageFile(mimetype: string): boolean {
-    return mimetype.startsWith('image/');
+    return this.isImageSupported(mimetype);
+  }
+
+  /**
+   * Enhanced image support checking with specific supported formats
+   */
+  private isImageSupported(mimetype: string): boolean {
+    const supportedTypes = [
+      'image/jpeg',
+      'image/jpg', 
+      'image/png',
+      'image/gif',
+      'image/webp',
+      'image/svg+xml',
+      'image/bmp',
+      'image/tiff'
+    ];
+    
+    return supportedTypes.includes(mimetype.toLowerCase());
+  }
+
+  /**
+   * Convert image to base64 data URL for embedding (if needed in future)
+   */
+  async convertImageToBase64(imagePath: string, mimetype: string): Promise<string | null> {
+    try {
+      const imageBuffer = fs.readFileSync(imagePath);
+      const base64Image = imageBuffer.toString('base64');
+      return `data:${mimetype};base64,${base64Image}`;
+    } catch (error) {
+      this.logger.error('Failed to convert image to base64', error);
+      return null;
+    }
   }
 
   private isTextFile(mimetype: string): boolean {
@@ -104,43 +138,7 @@ export class FileHandler {
   }
 
   async formatFilePrompt(files: ProcessedFile[], userText: string): Promise<string> {
-    let prompt = userText || 'Please analyze the uploaded files.';
-    
-    if (files.length > 0) {
-      prompt += '\n\nUploaded files:\n';
-      
-      for (const file of files) {
-        if (file.isImage) {
-          prompt += `\n## Image: ${file.name}\n`;
-          prompt += `File type: ${file.mimetype}\n`;
-          prompt += `Path: ${file.path}\n`;
-          prompt += `Note: This is an image file that has been uploaded. You can analyze it using the Read tool to examine the image content.\n`;
-        } else if (file.isText) {
-          prompt += `\n## File: ${file.name}\n`;
-          prompt += `File type: ${file.mimetype}\n`;
-          
-          try {
-            const content = fs.readFileSync(file.path, 'utf-8');
-            if (content.length > 10000) {
-              prompt += `Content (truncated to first 10000 characters):\n\`\`\`\n${content.substring(0, 10000)}...\n\`\`\`\n`;
-            } else {
-              prompt += `Content:\n\`\`\`\n${content}\n\`\`\`\n`;
-            }
-          } catch (error) {
-            prompt += `Error reading file content: ${error}\n`;
-          }
-        } else {
-          prompt += `\n## File: ${file.name}\n`;
-          prompt += `File type: ${file.mimetype}\n`;
-          prompt += `Size: ${file.size} bytes\n`;
-          prompt += `Note: This is a binary file. Content analysis may be limited.\n`;
-        }
-      }
-      
-      prompt += '\nPlease analyze these files and provide insights or assistance based on their content.';
-    }
-
-    return prompt;
+    return this.formatter.formatFilePrompt(files, userText);
   }
 
   async cleanupTempFiles(files: ProcessedFile[]): Promise<void> {
@@ -158,7 +156,7 @@ export class FileHandler {
 
   getSupportedFileTypes(): string[] {
     return [
-      'Images: jpg, png, gif, webp, svg',
+      'Images: jpg/jpeg, png, gif, webp, svg, bmp, tiff',
       'Text files: txt, md, json, js, ts, py, java, etc.',
       'Documents: pdf, docx (limited support)',
       'Code files: most programming languages',

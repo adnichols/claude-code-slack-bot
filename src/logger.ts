@@ -23,6 +23,10 @@ export class Logger {
     }
   }
 
+  isDebugEnabled(): boolean {
+    return config.debug;
+  }
+
   info(message: string, data?: any) {
     console.log(this.formatMessage('INFO', message, data));
   }

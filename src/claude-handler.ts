@@ -3,6 +3,7 @@ import { ConversationSession } from './types';
 import { Logger } from './logger';
 import { McpManager, McpServerConfig } from './mcp-manager';
 import { ErrorAnalyzer } from './error-analyzer';
+import { config } from './config';
 import * as path from 'path';
 
 export class ClaudeHandler {
@@ -67,7 +68,7 @@ export class ClaudeHandler {
           command: 'npx',
           args: ['tsx', path.join(process.cwd(), 'src', 'permission-mcp-server.ts')],
           env: {
-            SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN,
+            SLACK_BOT_TOKEN: config.slack.botToken,
             SLACK_CONTEXT: JSON.stringify({
               ...slackContext,
               workingDirectory,
