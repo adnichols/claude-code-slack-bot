@@ -8,8 +8,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { WebClient } from '@slack/web-api';
 import { Logger } from './logger.js';
+import { config, getSlackContext } from './config.js';
 import { PermissionFormatter, ApprovalScope } from './permission-formatter.js';
-import { config } from './config.js';
 import { localConfigReader } from './local-config-reader.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -72,7 +72,7 @@ class PermissionMCPServer {
       }
     );
 
-    this.slack = new WebClient(process.env.SLACK_BOT_TOKEN);
+    this.slack = new WebClient(config.slack.botToken);
     this.setupHandlers();
     this.loadPersistedApprovals();
   }
@@ -296,8 +296,7 @@ class PermissionMCPServer {
     logger.info('Permission prompt called!', { tool_name, input });
     
     // Get Slack context from environment (passed by Claude handler)
-    const slackContextStr = process.env.SLACK_CONTEXT;
-    const slackContext = slackContextStr ? JSON.parse(slackContextStr) : {};
+    const slackContext = getSlackContext();
     const { channel, threadTs: thread_ts, user, workingDirectory, requestId } = slackContext;
     
     logger.info('Slack context for permission', { channel, thread_ts, user, workingDirectory, requestId });

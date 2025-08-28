@@ -32,6 +32,14 @@ export const config = {
   },
 };
 
+/**
+ * Get runtime Slack context from environment (used by MCP server)
+ */
+export function getSlackContext() {
+  const slackContextStr = process.env.SLACK_CONTEXT;
+  return slackContextStr ? JSON.parse(slackContextStr) : {};
+}
+
 export function validateConfig() {
   const required = [
     'SLACK_BOT_TOKEN',

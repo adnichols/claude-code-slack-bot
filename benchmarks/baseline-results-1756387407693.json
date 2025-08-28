@@ -1,0 +1,90 @@
+{
+  "timestamp": "2025-08-28T13:23:27.550Z",
+  "version": "pre-simplification",
+  "measurements": {
+    "memory": {
+      "baseline": {
+        "rss": 44154880,
+        "heapUsed": 4192280,
+        "heapTotal": 5865472,
+        "external": 1536861
+      },
+      "with35KBString": {
+        "rss": 44171264,
+        "heapUsed": 4198264,
+        "heapTotal": 5865472,
+        "external": 1536901,
+        "rssDelta": 16384,
+        "heapDelta": 5984
+      }
+    },
+    "fileOperations": {
+      "1KB": {
+        "writeTime": 0.12366700000000108,
+        "readTime": 0.026583000000000467,
+        "statTime": 0.022875000000000867,
+        "size": 1024,
+        "readThroughput": 38520859.19572591
+      },
+      "100KB": {
+        "writeTime": 0.11487499999999962,
+        "readTime": 0.06395800000000129,
+        "statTime": 0.011167000000000371,
+        "size": 102400,
+        "readThroughput": 1601050689.5149617
+      },
+      "1MB": {
+        "writeTime": 0.30400000000000027,
+        "readTime": 0.6499170000000003,
+        "statTime": 0.008167000000000257,
+        "size": 1048576,
+        "readThroughput": 1613399864.9058256
+      },
+      "10MB": {
+        "writeTime": 2.6540000000000017,
+        "readTime": 3.6107499999999995,
+        "statTime": 0.017208000000000112,
+        "size": 10485760,
+        "readThroughput": 2904039327.0096245
+      }
+    },
+    "stringOperations": {
+      "lineStripping": {
+        "time": 0.13395800000000335,
+        "inputSize": 24000,
+        "outputSize": 24000,
+        "linesProcessed": 1001
+      },
+      "truncation": {
+        "time": 0.000542000000002929,
+        "inputSize": 24000,
+        "outputSize": 24000,
+        "wasTruncated": false
+      },
+      "jsonStringify": {
+        "time": 0.04016699999999673,
+        "inputSize": 24000,
+        "outputSize": 25014
+      }
+    },
+    "concurrency": {
+      "concurrentFileOps": {
+        "operationCount": 10,
+        "totalTime": 8.693583,
+        "avgTimePerOp": 0.8693583,
+        "successCount": 10,
+        "totalBytesProcessed": 1024000
+      }
+    },
+    "moduleLoading": {
+      "@slack/bolt": {
+        "loadTime": 92.104209,
+        "success": true
+      },
+      "typescript-dist": {
+        "loadTime": 31.266415999999992,
+        "success": true
+      }
+    }
+  }
+}

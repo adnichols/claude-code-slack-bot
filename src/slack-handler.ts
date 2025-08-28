@@ -9,6 +9,12 @@ import { McpManager } from './mcp-manager';
 import { permissionServer } from './permission-mcp-server';
 import { config } from './config';
 import { ErrorAnalyzer } from './error-analyzer';
+import { ErrorHandler } from './error-handler';
+import { MessageFormatter } from './message-formatter';
+import { ContentSecurity } from './content-security';
+import { ReactionManager } from './reaction-manager';
+import { CommandHandler } from './command-handler';
+import { PermissionHandler } from './handlers/permission-handler';
 
 interface MessageEvent {
   user: string;
@@ -36,9 +42,13 @@ export class SlackHandler {
   private fileHandler: FileHandler;
   private todoManager: TodoManager;
   private mcpManager: McpManager;
+  private messageFormatter: MessageFormatter;
+  private contentSecurity: ContentSecurity;
+  private reactionManager: ReactionManager;
+  private commandHandler: CommandHandler;
+  private permissionHandler: PermissionHandler;
+  private errorHandler: ErrorHandler;
   private todoMessages: Map<string, string> = new Map(); // sessionKey -> messageTs
-  private originalMessages: Map<string, { channel: string; ts: string }> = new Map(); // sessionKey -> original message info
-  private currentReactions: Map<string, string> = new Map(); // sessionKey -> current emoji
   private botUserId: string | null = null;
 
   constructor(app: App, claudeHandler: ClaudeHandler, mcpManager: McpManager) {
@@ -48,6 +58,12 @@ export class SlackHandler {
     this.workingDirManager = new WorkingDirectoryManager();
     this.fileHandler = new FileHandler();
     this.todoManager = new TodoManager();
+    this.messageFormatter = new MessageFormatter();
+    this.contentSecurity = new ContentSecurity();
+    this.reactionManager = new ReactionManager(app);
+    this.commandHandler = new CommandHandler(this.workingDirManager, this.mcpManager);
+    this.permissionHandler = new PermissionHandler(app);
+    this.errorHandler = ErrorHandler.forComponent('SlackHandler');
   }
 
   async handleMessage(event: MessageEvent, say: any) {
@@ -79,73 +95,35 @@ export class SlackHandler {
       fileCount: processedFiles.length,
     });
 
-    // Check if this is a working directory command (only if there's text)
-    const setDirPath = text ? this.workingDirManager.parseSetCommand(text) : null;
-    if (setDirPath) {
-      const isDM = channel.startsWith('D');
-      const result = this.workingDirManager.setWorkingDirectory(
-        channel,
-        setDirPath,
-        thread_ts,
-        isDM ? user : undefined
-      );
+    // Handle commands first (only if there's text)
+    if (text) {
+      const commandResult = await this.commandHandler.processCommand(text, channel, user, thread_ts);
+      if (commandResult.handled) {
+        if (commandResult.response) {
+          await say({
+            text: commandResult.response,
+            thread_ts: thread_ts || ts,
+          });
+        }
+        return;
+      }
 
-      if (result.success) {
+      // Check if this is a get directory command
+      if (this.workingDirManager.isGetCommand(text)) {
+        const isDM = channel.startsWith('D');
+        const directory = this.workingDirManager.getWorkingDirectory(
+          channel,
+          thread_ts,
+          isDM ? user : undefined
+        );
         const context = thread_ts ? 'this thread' : (isDM ? 'this conversation' : 'this channel');
+        
         await say({
-          text: `✅ Working directory set for ${context}: \`${result.resolvedPath}\``,
+          text: this.workingDirManager.formatDirectoryMessage(directory, context),
           thread_ts: thread_ts || ts,
         });
-      } else {
-        await say({
-          text: `❌ ${result.error}`,
-          thread_ts: thread_ts || ts,
-        });
+        return;
       }
-      return;
-    }
-
-    // Check if this is a get directory command (only if there's text)
-    if (text && this.workingDirManager.isGetCommand(text)) {
-      const isDM = channel.startsWith('D');
-      const directory = this.workingDirManager.getWorkingDirectory(
-        channel,
-        thread_ts,
-        isDM ? user : undefined
-      );
-      const context = thread_ts ? 'this thread' : (isDM ? 'this conversation' : 'this channel');
-      
-      await say({
-        text: this.workingDirManager.formatDirectoryMessage(directory, context),
-        thread_ts: thread_ts || ts,
-      });
-      return;
-    }
-
-    // Check if this is an MCP info command (only if there's text)
-    if (text && this.isMcpInfoCommand(text)) {
-      await say({
-        text: this.mcpManager.formatMcpInfo(),
-        thread_ts: thread_ts || ts,
-      });
-      return;
-    }
-
-    // Check if this is an MCP reload command (only if there's text)
-    if (text && this.isMcpReloadCommand(text)) {
-      const reloaded = this.mcpManager.reloadConfiguration();
-      if (reloaded) {
-        await say({
-          text: `✅ MCP configuration reloaded successfully.\n\n${this.mcpManager.formatMcpInfo()}`,
-          thread_ts: thread_ts || ts,
-        });
-      } else {
-        await say({
-          text: `❌ Failed to reload MCP configuration. Check the mcp-servers.json file.`,
-          thread_ts: thread_ts || ts,
-        });
-      }
-      return;
     }
 
     // Check if we have a working directory set
@@ -179,7 +157,7 @@ export class SlackHandler {
     
     // Store the original message info for status reactions
     const originalMessageTs = thread_ts || ts;
-    this.originalMessages.set(sessionKey, { channel, ts: originalMessageTs });
+    this.reactionManager.setOriginalMessage(sessionKey, channel, originalMessageTs);
     
     // Cancel any existing request for this conversation
     const existingController = this.activeControllers.get(sessionKey);
@@ -223,14 +201,10 @@ export class SlackHandler {
       statusMessageTs = statusResult.ts;
 
       // Add thinking reaction to original message (but don't spam if already set)
-      await this.updateMessageReaction(sessionKey, '🤔');
+      await this.reactionManager.updateMessageReaction(sessionKey, 'thinking_face');
       
       // Create Slack context for permission prompts
-      const slackContext = {
-        channel,
-        threadTs: thread_ts,
-        user
-      };
+      const slackContext = this.permissionHandler.createSlackContext(channel, user, thread_ts);
       
       let slackMessageCount = 0;
       
@@ -299,7 +273,7 @@ export class SlackHandler {
             }
 
             // Update reaction to show working
-            await this.updateMessageReaction(sessionKey, '⚙️');
+            await this.reactionManager.updateMessageReaction(sessionKey, 'gear');
 
             // Check for TodoWrite tool and handle it specially
             const todoTool = message.message.content?.find((part: any) => 
@@ -316,7 +290,7 @@ export class SlackHandler {
             }
 
             // For other tool use messages, format them immediately as new messages
-            const toolContent = this.formatToolUse(message.message.content);
+            const toolContent = this.messageFormatter.formatToolUse(message.message.content);
             if (toolContent) { // Only send if there's content (TodoWrite returns empty string)
               this.logger.info('Sending tool use content to Slack', {
                 slackMessageIndex: slackMessageCount,
@@ -336,7 +310,7 @@ export class SlackHandler {
             }
           } else {
             // Handle regular text content
-            const textContent = this.extractTextContent(message);
+            const textContent = this.messageFormatter.extractTextContent(message);
             this.logger.info('Processing text-only assistant message', {
               slackMessageIndex: slackMessageCount,
               sessionKey,
@@ -445,7 +419,7 @@ export class SlackHandler {
       }
 
       // Update reaction to show completion
-      await this.updateMessageReaction(sessionKey, '✅');
+      await this.reactionManager.updateMessageReaction(sessionKey, 'white_check_mark');
 
       this.logger.info('Completed processing message', {
         sessionKey,
@@ -470,7 +444,7 @@ export class SlackHandler {
         }
 
         // Update reaction to show error
-        await this.updateMessageReaction(sessionKey, '❌');
+        await this.reactionManager.updateMessageReaction(sessionKey, 'x');
         
         // Analyze error and provide actionable feedback
         const actionableError = ErrorAnalyzer.analyzeError(error);
@@ -503,7 +477,7 @@ export class SlackHandler {
         }
 
         // Update reaction to show cancellation
-        await this.updateMessageReaction(sessionKey, '⏹️');
+        await this.reactionManager.updateMessageReaction(sessionKey, 'stop_sign');
       }
 
       // Clean up temporary files in case of error too
@@ -519,104 +493,13 @@ export class SlackHandler {
         setTimeout(() => {
           this.todoManager.cleanupSession(session.sessionId!);
           this.todoMessages.delete(sessionKey);
-          this.originalMessages.delete(sessionKey);
-          this.currentReactions.delete(sessionKey);
+          this.reactionManager.cleanup(sessionKey);
         }, 5 * 60 * 1000); // 5 minutes
       }
     }
   }
 
-  private extractTextContent(message: SDKMessage): string | null {
-    if (message.type === 'assistant' && message.message.content) {
-      const textParts = message.message.content
-        .filter((part: any) => part.type === 'text')
-        .map((part: any) => part.text);
-      return textParts.join('');
-    }
-    return null;
-  }
 
-  private formatToolUse(content: any[]): string {
-    const parts: string[] = [];
-    
-    for (const part of content) {
-      if (part.type === 'text') {
-        parts.push(part.text);
-      } else if (part.type === 'tool_use') {
-        const toolName = part.name;
-        const input = part.input;
-        
-        switch (toolName) {
-          case 'Edit':
-          case 'MultiEdit':
-            parts.push(this.formatEditTool(toolName, input));
-            break;
-          case 'Write':
-            parts.push(this.formatWriteTool(input));
-            break;
-          case 'Read':
-            parts.push(this.formatReadTool(input));
-            break;
-          case 'Bash':
-            parts.push(this.formatBashTool(input));
-            break;
-          case 'TodoWrite':
-            // Handle TodoWrite separately - don't include in regular tool output
-            return this.handleTodoWrite(input);
-          default:
-            parts.push(this.formatGenericTool(toolName, input));
-        }
-      }
-    }
-    
-    return parts.join('\n\n');
-  }
-
-  private formatEditTool(toolName: string, input: any): string {
-    const filePath = input.file_path;
-    const edits = toolName === 'MultiEdit' ? input.edits : [{ old_string: input.old_string, new_string: input.new_string }];
-    
-    let result = `📝 *Editing \`${filePath}\`*\n`;
-    
-    for (const edit of edits) {
-      result += '\n```diff\n';
-      result += `- ${this.truncateString(edit.old_string, 200)}\n`;
-      result += `+ ${this.truncateString(edit.new_string, 200)}\n`;
-      result += '```';
-    }
-    
-    return result;
-  }
-
-  private formatWriteTool(input: any): string {
-    const filePath = input.file_path;
-    const preview = this.truncateString(input.content, 300);
-    
-    return `📄 *Creating \`${filePath}\`*\n\`\`\`\n${preview}\n\`\`\``;
-  }
-
-  private formatReadTool(input: any): string {
-    return `👁️ *Reading \`${input.file_path}\`*`;
-  }
-
-  private formatBashTool(input: any): string {
-    return `🖥️ *Running command:*\n\`\`\`bash\n${input.command}\n\`\`\``;
-  }
-
-  private formatGenericTool(toolName: string, input: any): string {
-    return `🔧 *Using ${toolName}*`;
-  }
-
-  private truncateString(str: string, maxLength: number): string {
-    if (!str) return '';
-    if (str.length <= maxLength) return str;
-    return str.substring(0, maxLength) + '...';
-  }
-
-  private handleTodoWrite(input: any): string {
-    // TodoWrite tool doesn't produce visible output - handled separately
-    return '';
-  }
 
   private async handleTodoUpdate(
     input: any, 
@@ -673,7 +556,7 @@ export class SlackHandler {
       }
 
       // Update reaction based on overall progress
-      await this.updateTaskProgressReaction(sessionKey, newTodos);
+      await this.reactionManager.updateTaskProgressReaction(sessionKey, newTodos);
     }
   }
 
@@ -695,101 +578,7 @@ export class SlackHandler {
     }
   }
 
-  private async updateMessageReaction(sessionKey: string, emoji: string): Promise<void> {
-    const originalMessage = this.originalMessages.get(sessionKey);
-    if (!originalMessage) {
-      return;
-    }
 
-    // Convert Unicode emojis to Slack emoji names
-    const emojiMap: Record<string, string> = {
-      '🤔': 'thinking_face',
-      '⚙️': 'gear',
-      '✅': 'white_check_mark',
-      '❌': 'x',
-      '📋': 'clipboard',
-      '🔄': 'arrows_counterclockwise',
-      '⏹️': 'stop_button'
-    };
-
-    const slackEmojiName = emojiMap[emoji] || emoji;
-
-    // Check if we're already showing this emoji
-    const currentEmoji = this.currentReactions.get(sessionKey);
-    if (currentEmoji === slackEmojiName) {
-      this.logger.debug('Reaction already set, skipping', { sessionKey, emoji: slackEmojiName });
-      return;
-    }
-
-    try {
-      // Remove the current reaction if it exists
-      if (currentEmoji) {
-        try {
-          await this.app.client.reactions.remove({
-            channel: originalMessage.channel,
-            timestamp: originalMessage.ts,
-            name: currentEmoji,
-          });
-          this.logger.debug('Removed previous reaction', { sessionKey, emoji: currentEmoji });
-        } catch (error) {
-          this.logger.debug('Failed to remove previous reaction (might not exist)', { 
-            sessionKey, 
-            emoji: currentEmoji,
-            error: (error as any).message 
-          });
-        }
-      }
-
-      // Add the new reaction
-      await this.app.client.reactions.add({
-        channel: originalMessage.channel,
-        timestamp: originalMessage.ts,
-        name: slackEmojiName,
-      });
-
-      // Track the current reaction
-      this.currentReactions.set(sessionKey, slackEmojiName);
-
-      this.logger.debug('Updated message reaction', { 
-        sessionKey, 
-        emoji, 
-        previousEmoji: currentEmoji,
-        channel: originalMessage.channel, 
-        ts: originalMessage.ts 
-      });
-    } catch (error) {
-      this.logger.warn('Failed to update message reaction', error);
-    }
-  }
-
-  private async updateTaskProgressReaction(sessionKey: string, todos: Todo[]): Promise<void> {
-    if (todos.length === 0) {
-      return;
-    }
-
-    const completed = todos.filter(t => t.status === 'completed').length;
-    const inProgress = todos.filter(t => t.status === 'in_progress').length;
-    const total = todos.length;
-
-    let emoji: string;
-    if (completed === total) {
-      emoji = '✅'; // All tasks completed
-    } else if (inProgress > 0) {
-      emoji = '🔄'; // Tasks in progress
-    } else {
-      emoji = '📋'; // Tasks pending
-    }
-
-    await this.updateMessageReaction(sessionKey, emoji);
-  }
-
-  private isMcpInfoCommand(text: string): boolean {
-    return /^(mcp|servers?)(\s+(info|list|status))?(\?)?$/i.test(text.trim());
-  }
-
-  private isMcpReloadCommand(text: string): boolean {
-    return /^(mcp|servers?)\s+(reload|refresh)$/i.test(text.trim());
-  }
 
   private async getBotUserId(): Promise<string> {
     if (!this.botUserId) {
@@ -811,29 +600,13 @@ export class SlackHandler {
         channel: channelId,
       });
 
-      const channelName = (channelInfo.channel as any)?.name || 'this channel';
-      
-      let welcomeMessage = `👋 Hi! I'm Claude Code, your AI coding assistant.\n\n`;
-      welcomeMessage += `To get started, I need to know the default working directory for #${channelName}.\n\n`;
-      
-      if (config.baseDirectory) {
-        welcomeMessage += `You can use:\n`;
-        welcomeMessage += `• \`cwd project-name\` (relative to base directory: \`${config.baseDirectory}\`)\n`;
-        welcomeMessage += `• \`cwd /absolute/path/to/project\` (absolute path)\n\n`;
-      } else {
-        welcomeMessage += `Please set it using:\n`;
-        welcomeMessage += `• \`cwd /path/to/project\` or \`set directory /path/to/project\`\n\n`;
-      }
-      
-      welcomeMessage += `This will be the default working directory for this channel. `;
-      welcomeMessage += `You can always override it for specific threads by mentioning me with a different \`cwd\` command.\n\n`;
-      welcomeMessage += `Once set, you can ask me to help with code reviews, file analysis, debugging, and more!`;
+      const welcomeMessage = this.commandHandler.getChannelJoinMessage();
 
       await say({
         text: welcomeMessage,
       });
 
-      this.logger.info('Sent welcome message to channel', { channelId, channelName });
+      this.logger.info('Sent welcome message to channel', { channelId });
     } catch (error) {
       this.logger.error('Failed to handle channel join', error);
     }
@@ -965,19 +738,21 @@ export class SlackHandler {
       if (toolResult.content && typeof toolResult.content === 'string') {
         let displayContent: string | null = null;
         
-        try {
-          displayContent = this.displayFileContent(toolResult.content, toolResult.tool_use_id);
-        } catch (contentError: any) {
-          this.logger.error('Error processing file content', {
-            error: contentError.message,
+        const contentResult = this.errorHandler.handleSyncOperation(
+          () => this.displayFileContent(toolResult.content, toolResult.tool_use_id),
+          {
+            operation: 'processFileContent',
             sessionKey,
-            toolUseId: toolResult.tool_use_id,
-            contentLength: toolResult.content.length
-          });
-          
-          // Graceful fallback for content processing errors
-          displayContent = this.createContentProcessingErrorFallback(contentError.message);
-        }
+            additionalContext: { 
+              toolUseId: toolResult.tool_use_id, 
+              contentLength: toolResult.content.length 
+            }
+          }
+        );
+        
+        displayContent = contentResult.success 
+          ? contentResult.data 
+          : this.createContentProcessingErrorFallback(contentResult.error.userMessage);
         
         if (displayContent) {
           try {
@@ -996,46 +771,45 @@ export class SlackHandler {
             });
             
           } catch (slackError: any) {
-            this.logger.error('Error sending content to Slack', {
-              error: slackError.message,
+            const errorResult = this.errorHandler.handleError(slackError, {
+              operation: 'sendContentToSlack',
               sessionKey,
-              toolUseId: toolResult.tool_use_id
+              additionalContext: { toolUseId: toolResult.tool_use_id }
             });
             
-            // Attempt to send a simplified error message
-            try {
-              await say({
+            // Attempt fallback with standardized error handling
+            const fallbackResult = await this.errorHandler.handleAsyncOperation(
+              () => say({
                 text: this.createSlackSendErrorFallback(),
                 thread_ts: threadTs,
-              });
-            } catch (fallbackError: any) {
-              this.logger.error('Critical: Failed to send fallback error message', {
-                error: fallbackError.message,
-                sessionKey
-              });
+              }),
+              { operation: 'sendFallbackMessage', sessionKey }
+            );
+            
+            if (!fallbackResult.success) {
+              this.errorHandler.warn('Failed to send fallback message', { sessionKey });
             }
           }
         }
       }
     } catch (criticalError: any) {
-      this.logger.error('Critical error in processToolResult', {
-        error: criticalError.message,
-        stack: criticalError.stack,
+      const errorResult = this.errorHandler.handleError(criticalError, {
+        operation: 'processToolResult',
         sessionKey,
-        toolUseId: toolResult?.tool_use_id
+        additionalContext: { toolUseId: toolResult?.tool_use_id }
       });
       
-      // Last resort fallback - try to indicate something went wrong
-      try {
-        await say({
-          text: '❌ *An unexpected error occurred while processing file content.*',
+      // Attempt fallback notification with standardized error handling
+      const fallbackResult = await this.errorHandler.handleAsyncOperation(
+        () => say({
+          text: `❌ ${errorResult.userMessage}`,
           thread_ts: threadTs,
-        });
-      } catch (lastResortError: any) {
-        this.logger.error('Critical: Complete failure in error handling', {
-          error: lastResortError.message,
-          sessionKey
-        });
+        }),
+        { operation: 'sendFallbackNotification', sessionKey }
+      );
+      
+      if (!fallbackResult.success) {
+        this.errorHandler.warn('Complete failure in error recovery', { sessionKey });
       }
     }
   }
@@ -1262,55 +1036,7 @@ export class SlackHandler {
     return languageMap[extension || ''] || '';
   }
 
-  private stripLineNumbers(content: string): string {
-    // First, remove system reminder blocks (which can span multiple lines)
-    let cleanContent = content.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '');
-    
-    // Then strip line number prefixes line by line
-    return cleanContent
-      .split('\n')
-      .map(line => {
-        // Match line number prefix pattern and remove it
-        const match = line.match(/^\s*\d+→(.*)$/);
-        return match ? match[1] : line;
-      })
-      .join('\n')
-      .trim(); // Remove extra whitespace
-  }
 
-  private truncateContent(content: string, maxLength: number = 400): { truncated: string; wasTruncated: boolean } {
-    if (content.length <= maxLength) {
-      return { truncated: content, wasTruncated: false };
-    }
-
-    // Try to truncate at a smart breakpoint (line ending, sentence ending, word boundary)
-    let truncateAt = maxLength;
-    
-    // Look for line breaks near the limit
-    const nearbyNewline = content.lastIndexOf('\n', maxLength);
-    if (nearbyNewline > maxLength * 0.7) { // At least 70% of content
-      truncateAt = nearbyNewline;
-    } else {
-      // Look for sentence endings
-      const nearbySentenceEnd = Math.max(
-        content.lastIndexOf('. ', maxLength),
-        content.lastIndexOf('.\n', maxLength),
-        content.lastIndexOf(';\n', maxLength)
-      );
-      if (nearbySentenceEnd > maxLength * 0.8) { // At least 80% of content
-        truncateAt = nearbySentenceEnd + 1;
-      } else {
-        // Look for word boundaries
-        const nearbySpace = content.lastIndexOf(' ', maxLength);
-        if (nearbySpace > maxLength * 0.9) { // At least 90% of content
-          truncateAt = nearbySpace;
-        }
-      }
-    }
-
-    const truncated = content.substring(0, truncateAt).trim();
-    return { truncated, wasTruncated: true };
-  }
 
   private displayFileContent(content: string, toolUseId?: string): string | null {
     try {
@@ -1374,10 +1100,10 @@ export class SlackHandler {
       const language = this.getLanguageFromPath(filePath || undefined);
       
       // Strip line numbers from Claude Code Read tool output
-      const cleanContent = this.stripLineNumbers(content);
+      const cleanContent = this.messageFormatter.stripLineNumbers(content);
       
       // Truncate content with smart line-break handling
-      const { truncated, wasTruncated } = this.truncateContent(cleanContent, 35000);
+      const { truncated, wasTruncated } = this.messageFormatter.truncateContent(cleanContent, 35000);
       
       // Format as code block with language hint if available
       let formattedContent = '';
@@ -1532,33 +1258,6 @@ export class SlackHandler {
       }
     });
 
-    // Handle permission approval button clicks
-    this.app.action('approve_tool', async ({ ack, body, respond }) => {
-      await ack();
-      const approvalId = (body as any).actions[0].value;
-      this.logger.info('Tool approval granted', { approvalId });
-      
-      permissionServer.resolveApproval(approvalId, true);
-      
-      await respond({
-        response_type: 'ephemeral',
-        text: '✅ Tool execution approved'
-      });
-    });
-
-    // Handle permission denial button clicks
-    this.app.action('deny_tool', async ({ ack, body, respond }) => {
-      await ack();
-      const approvalId = (body as any).actions[0].value;
-      this.logger.info('Tool approval denied', { approvalId });
-      
-      permissionServer.resolveApproval(approvalId, false);
-      
-      await respond({
-        response_type: 'ephemeral',
-        text: '❌ Tool execution denied'
-      });
-    });
 
     // Cleanup inactive sessions periodically
     setInterval(() => {
