@@ -2,9 +2,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { Logger } from './logger';
-import { config } from './config';
-import { FileContentFormatter } from './file-content-formatter';
+import { Logger } from './logger.js';
+import { config } from './config.js';
+import { FileContentFormatter } from './file-content-formatter.js';
 
 export interface ProcessedFile {
   path: string;

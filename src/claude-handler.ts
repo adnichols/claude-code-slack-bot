@@ -1,9 +1,9 @@
 import { query, type SDKMessage } from '@anthropic-ai/claude-code';
-import { ConversationSession } from './types';
-import { Logger } from './logger';
-import { McpManager, McpServerConfig } from './mcp-manager';
-import { ErrorAnalyzer } from './error-analyzer';
-import { config } from './config';
+import { ConversationSession } from './types.js';
+import { Logger } from './logger.js';
+import { McpManager, McpServerConfig } from './mcp-manager.js';
+import { ErrorAnalyzer } from './error-analyzer.js';
+import { config } from './config.js';
 import * as path from 'path';
 
 export class ClaudeHandler {

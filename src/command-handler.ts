@@ -1,6 +1,6 @@
-import { Logger } from './logger';
-import { WorkingDirectoryManager } from './working-directory-manager';
-import { McpManager } from './mcp-manager';
+import { Logger } from './logger.js';
+import { WorkingDirectoryManager } from './working-directory-manager.js';
+import { McpManager } from './mcp-manager.js';
 
 export interface CommandResult {
   handled: boolean;

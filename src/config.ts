@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { ApprovalScope } from './permission-formatter';
+import { ApprovalScope } from './permission-formatter.js';
 
 dotenv.config();
 
