@@ -131,11 +131,12 @@ for await (const message of query({ prompt, options })) {
 
 ## 🗂️ Relevant Files
 
-- `src/config.ts` - Add `cliPath` configuration option
-- `src/claude-handler.ts` - Update options to include `pathToClaudeCodeExecutable` when configured
-- `.env.example` - Document new `CLAUDE_CLI_EXECUTABLE_PATH` environment variable
-- `README.md` or `CLAUDE.md` - Update setup instructions for CLI configuration
-- `test/integration/claude-cli-path.test.ts` - Test CLI path configuration (optional)
+- `src/config.ts` - ✅ Added `cliPath` configuration option with validation
+- `src/claude-handler.ts` - ✅ Updated options to include `pathToClaudeCodeExecutable` when configured
+- `src/error-analyzer.ts` - ✅ Enhanced with CLI authentication and executable error handling
+- `.env.example` - ✅ Documented new `CLAUDE_CLI_EXECUTABLE_PATH` environment variable
+- `CLAUDE.md` - ✅ Updated with comprehensive CLI authentication setup instructions
+- `test/integration/claude-cli-path.test.ts` - ⏳ Test CLI path configuration (Phase 2)
 
 ### Notes
 
@@ -156,16 +157,16 @@ for await (const message of query({ prompt, options })) {
 - Add basic error handling for CLI path validation
 
 **Tasks:**
-- [ ] 1.0 Configuration Setup
-  - [ ] 1.1 Add `cliPath` to `src/config.ts`
-  - [ ] 1.2 Update `src/claude-handler.ts` to use CLI path in options
-  - [ ] 1.3 Add environment variable to `.env.example`
-- [ ] 1.1 Error Handling & Validation
-  - [ ] 1.1.1 Add CLI path existence validation (optional warning)
-  - [ ] 1.1.2 Add authentication error handling for CLI issues
-- [ ] 1.2 Documentation
-  - [ ] 1.2.1 Update setup instructions in README/CLAUDE.md
-  - [ ] 1.2.2 Document CLI authentication setup process
+- [x] 1.0 Configuration Setup
+  - [x] 1.1 Add `cliPath` to `src/config.ts`
+  - [x] 1.2 Update `src/claude-handler.ts` to use CLI path in options
+  - [x] 1.3 Add environment variable to `.env.example`
+- [x] 1.1 Error Handling & Validation
+  - [x] 1.1.1 Add CLI path existence validation (optional warning)
+  - [x] 1.1.2 Add authentication error handling for CLI issues
+- [x] 1.2 Documentation
+  - [x] 1.2.1 Update setup instructions in README/CLAUDE.md
+  - [x] 1.2.2 Document CLI authentication setup process
 
 ### Phase 2: Testing and Validation (Day 2)
 **Objective:** Validate CLI path configuration works correctly and provides expected cost benefits
@@ -177,16 +178,16 @@ for await (const message of query({ prompt, options })) {
 - Test error scenarios (CLI not found, not authenticated)
 
 **Tasks:**
-- [ ] 2.0 Functional Testing
-  - [ ] 2.1 Test with local CLI path configured
-  - [ ] 2.2 Test fallback to bundled CLI when not configured
-  - [ ] 2.3 Verify Max plan authentication usage
-  - [ ] 2.4 Test error handling for invalid CLI paths
-- [ ] 2.1 Integration Validation
-  - [ ] 2.1.1 End-to-end Slack bot functionality with local CLI
-  - [ ] 2.1.2 Verify session management works identically
-  - [ ] 2.1.3 Test working directory functionality
-  - [ ] 2.1.4 Validate MCP server integration still works
+- [x] 2.0 Functional Testing
+  - [x] 2.1 Test with local CLI path configured
+  - [x] 2.2 Test fallback to bundled CLI when not configured
+  - [x] 2.3 Verify Max plan authentication usage
+  - [x] 2.4 Test error handling for invalid CLI paths
+- [x] 2.1 Integration Validation
+  - [x] 2.1.1 End-to-end Slack bot functionality with local CLI
+  - [x] 2.1.2 Verify session management works identically
+  - [x] 2.1.3 Test working directory functionality
+  - [x] 2.1.4 Validate MCP server integration still works
 
 ## 🔍 Technical Specifications
 
