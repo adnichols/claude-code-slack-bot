@@ -47,6 +47,14 @@ export class ClaudeHandler {
       permissionMode: slackContext ? 'default' : 'bypassPermissions',
     };
 
+    // Use local CLI if configured, otherwise fall back to bundled CLI
+    if (config.claude.cliPath) {
+      options.pathToClaudeCodeExecutable = config.claude.cliPath;
+      this.logger.info('Using local Claude CLI', { path: config.claude.cliPath });
+    } else {
+      this.logger.info('Using bundled Claude CLI (default)');
+    }
+
     // Add permission prompt tool if we have Slack context
     if (slackContext) {
       options.permissionPromptToolName = 'mcp__permission-prompt__permission_prompt';
