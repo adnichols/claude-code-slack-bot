@@ -94,6 +94,35 @@ CLAUDE_CODE_USE_VERTEX=1
 DEBUG=true
 ```
 
+### Claude CLI Authentication (Cost Optimization)
+For users with Claude Max plans, you can eliminate API charges within plan limits by using local CLI authentication:
+
+```env
+# Path to local Claude CLI executable
+CLAUDE_CLI_EXECUTABLE_PATH=/usr/local/bin/claude
+```
+
+**Setup Steps:**
+1. **Install Claude CLI**: Download from [https://claude.ai/cli](https://claude.ai/cli)
+2. **Authenticate**: Run `claude login` to authenticate with your Max plan
+3. **Configure Path**: Set `CLAUDE_CLI_EXECUTABLE_PATH` to your CLI installation path
+4. **Restart Bot**: Restart the bot to use Max plan authentication
+
+**Benefits:**
+- ✅ **Zero API charges** within Max plan limits
+- ✅ **Same functionality** - identical features and performance
+- ✅ **Automatic fallback** - uses bundled CLI if local CLI has issues
+- ✅ **Max plan authentication** - leverages your existing subscription
+
+**Path Discovery:**
+```bash
+# Find your Claude CLI installation
+which claude
+# Common locations:
+# macOS: /usr/local/bin/claude or /opt/homebrew/bin/claude
+# Linux: /usr/local/bin/claude or ~/.local/bin/claude
+```
+
 ## Slack App Configuration
 
 ### Required Permissions

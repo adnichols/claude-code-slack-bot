@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { existsSync } from 'fs';
 import { ApprovalScope } from './permission-formatter.js';
 
 dotenv.config();
@@ -15,6 +16,7 @@ export const config = {
   claude: {
     useBedrock: process.env.CLAUDE_CODE_USE_BEDROCK === '1',
     useVertex: process.env.CLAUDE_CODE_USE_VERTEX === '1',
+    cliPath: process.env.CLAUDE_CLI_EXECUTABLE_PATH || '',
   },
   baseDirectory: process.env.BASE_DIRECTORY || '',
   debug: process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development',
@@ -40,6 +42,16 @@ export function getSlackContext() {
   return slackContextStr ? JSON.parse(slackContextStr) : {};
 }
 
+function validateCliPath(path: string): void {
+  if (path && !existsSync(path)) {
+    console.warn(`⚠️ Claude CLI path not found: ${path}`);
+    console.warn('Falling back to bundled CLI. To use local CLI:');
+    console.warn('1. Install Claude CLI: https://claude.ai/cli');
+    console.warn('2. Run: claude login');
+    console.warn('3. Set CLAUDE_CLI_EXECUTABLE_PATH to the CLI location');
+  }
+}
+
 export function validateConfig() {
   const required = [
     'SLACK_BOT_TOKEN',
@@ -52,4 +64,9 @@ export function validateConfig() {
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
+}
+
+// Validate CLI path on startup if configured
+if (config.claude.cliPath) {
+  validateCliPath(config.claude.cliPath);
 }

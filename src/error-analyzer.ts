@@ -106,6 +106,30 @@ export class ErrorAnalyzer {
       };
     }
 
+    // Claude CLI authentication errors
+    if (errorMessage.includes('not logged in') || errorMessage.includes('login required') || 
+        errorMessage.includes('authentication expired') || errorMessage.includes('session expired')) {
+      return {
+        message: 'Claude CLI authentication required',
+        userAction: 'Run `claude login` to authenticate with your Max plan, then restart the bot',
+        category: 'user_action_required',
+        severity: 'high',
+        details: 'The local Claude CLI needs to be authenticated to use Max plan authentication. After logging in, the bot will use zero API charges within plan limits.'
+      };
+    }
+
+    // Claude CLI executable errors
+    if (errorMessage.includes('claude') && (errorMessage.includes('command not found') || 
+        errorMessage.includes('No such file') || errorMessage.includes('cannot execute'))) {
+      return {
+        message: 'Claude CLI executable not found',
+        userAction: 'Install Claude CLI or update CLAUDE_CLI_EXECUTABLE_PATH to correct location',
+        category: 'configuration',
+        severity: 'high',
+        details: 'Download Claude CLI from https://claude.ai/cli and ensure CLAUDE_CLI_EXECUTABLE_PATH points to the correct location (e.g., /usr/local/bin/claude)'
+      };
+    }
+
     // Claude Code SDK errors
     if (errorMessage.includes('Claude Code process exited')) {
       return {
